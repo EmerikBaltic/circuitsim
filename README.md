@@ -4,11 +4,12 @@ An educational desktop electrical circuit simulator built with **Python 3.11+**,
 
 ## Quick Start
 
-### 1. Create and Activate the Virtual Environment
+### 1. Create the Virtual Environment and Install in Editable Mode
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\pip.exe install -r requirements.txt
+.\.venv\Scripts\pip.exe install -e .
 ```
 
 ### 2. Run the Unit Tests

@@ -1,40 +1,42 @@
 # Project Progress — CircuitSim
 
-## Current Status: Milestone 1 — Step A Complete
+## Current Status: Milestone 1 Complete (Step A + Step B)
 
-### What Is Done (Milestone 1 — Step A)
-- **Environment & Project Skeleton**:
+### What Is Done
+- **Environment & Editable Package Installation**:
   - Local Python 3.12 virtual environment (`.venv`) with `PySide6`, `numpy`, `scipy`, and `pytest`.
-  - Standard package layout under `src/circuitsim/` and `tests/`, plus `.gitignore`, `pyproject.toml`, `requirements.txt`, and `README.md`.
+  - Project is installed in editable mode (`pip install -e .`) so `python -m circuitsim.main` and `pytest` work directly without setting `PYTHONPATH`.
 - **Engineering-Notation Value Parser (`src/circuitsim/dialogs/value_parser.py`)**:
-  - Case-sensitive engineering prefixes (`p`, `n`, `u`/`µ`, `m` = $10^{-3}$, `k`, `M`/`meg` = $10^6$, `G`) with unit stripping (`Ohm`, `Ω`, `V`, `A`, `W`, `F`, `H`, `Hz`, `s`).
-  - SPICE-compatible case-insensitive value parser (`parse_spice_value`) and auto-ranging formatter (`format_engineering_value`).
+  - Case-sensitive engineering prefixes (`p`, `n`, `u`/`µ`, `m` = $10^{-3}$, `k`, `M`/`meg` = $10^6$, `G`), SPICE-compatible parser (`parse_spice_value`), and auto-ranging formatter (`format_engineering_value`).
 - **Component Physics Models (`src/circuitsim/components/`)**:
-  - `Ground`, `Resistor`, `DCVoltageSource` (with optional internal resistance), `DCCurrentSource`, `Switch` ($1\text{ m}\Omega$ ON, $1\text{ G}\Omega$ OFF, timed switching), `Lightbulb` ($R_{\text{hot}} = V_{\text{rated}}^2 / P_{\text{rated}}$, optional thermal filament model, burnout tracking, brightness calculation), `Voltmeter` ($10\text{ M}\Omega$ default), and `Ammeter` ($1\text{ m}\Omega$ default).
+  - `Ground`, `Resistor`, `Capacitor` (with initial voltage and series `esr` folded into the companion stamp), `Inductor` (with series `dcr` folded into its branch equation, $\text{DCR}_{\min} = 1\text{ m}\Omega$ at DC, $X_L = 2\pi f L$, $L$ calculator helper, and $\tau = L / (R_{\text{thevenin}} + \text{DCR})$).
+  - `DCVoltageSource`, `DCCurrentSource`, `ACVoltageSource` (`sine`, `square`, `triangle`, `sawtooth`, `pulse`, with phase, duty cycle, and DC offset).
+  - `Switch` ($1\text{ m}\Omega$ ON, $1\text{ G}\Omega$ OFF, timed switching, $10\text{ pF}$ contact capacitance companion model), `Lightbulb` ($R_{\text{hot}} = V_{\text{rated}}^2 / P_{\text{rated}}$, optional thermal filament model, burnout tracking), `Voltmeter` ($10\text{ M}\Omega$ default), and `Ammeter` ($1\text{ m}\Omega$ default).
   - Strictly decoupled from Qt (`PySide6` is never imported in `components/` or `engine/`).
-- **DC Modified Nodal Analysis (MNA) Solver & Topology Validator (`src/circuitsim/engine/`)**:
-  - Pre-solve topological validation for `"No ground connected"`, `"Node X is floating"` (both disconnected islands and single-terminal dangling nodes), `"Voltage sources in a loop"`, and `"Ammeter X is connected in parallel across a voltage source or short circuit"`.
-  - MNA matrix builder with `GMIN = 1e-12 S` from every node to ground and cached LU factorization via `scipy.linalg.lu_factor` / `lu_solve`.
-- **Unit Tests (`tests/`)**:
-  - 46 passing tests covering value parsing, voltage dividers, Wheatstone bridges, parallel current dividers, 60 W / 120 V lightbulb specification, thermal filament inrush, switch state & LU cache reuse, meter polarity/ranging, extreme matrix conditioning ($1\text{ m}\Omega$ + $1\text{ G}\Omega$ + `GMIN`), and topology error detection.
+- **MNA DC & Transient Solver (`src/circuitsim/engine/`)**:
+  - Topological validation for missing ground, floating/dangling nodes, ideal voltage-source loops, and parallel ammeters, plus runtime detection for inductive kickback (`"Inductive kickback, consider a flyback diode"`).
+  - Exact DC Thévenin resistance calculator (`Circuit.thevenin_resistance`) with all independent sources zeroed.
+  - Transient analysis (`step_transient` and `solve_transient`) using companion models, **Backward Euler** on the first step and upon any switch event, and **Trapezoidal integration** on normal steps, with cached `scipy.linalg.lu_factor` / `lu_solve` factorization reuse.
+- **Unit Test Suite (`tests/`)**:
+  - **55 passing tests** covering value parsing, DC resistor networks, Wheatstone bridges, 60 W / 120 V lightbulb, switch states, meter modes, matrix conditioning, RC step charging, RL current rise with Thévenin resistance, RLC series resonance, AC RMS meter verification of inductive reactance $X_L = 2\pi f L$, lossless LC oscillation (zero numerical damping), 1st-order vs 2nd-order convergence rates, switch-event ringing elimination, and inductive kickback warnings.
 
-### What Is Next (Milestone 1 — Step B)
-- `Capacitor` (with initial voltage and optional ESR) and `Inductor` (with winding resistance DCR folded directly into the branch equation and minimum DC resistance $\approx 1\text{ m}\Omega$, plus $X_L = 2\pi f L$, $L$ helper, and $\tau = L / R_{\text{total}}$).
-- `ACVoltageSource` (sine, square, triangle, sawtooth, pulse with duty cycle, frequency, phase, and DC offset).
-- Transient MNA solver (`solve_transient` / step-by-step execution) using **Trapezoidal integration** on normal steps and **Backward Euler** on the first step and immediately after any switch event.
-- Analytical transient unit tests: RC charging curve, RL current rise, RLC resonance, and AC inductive reactance ($X_L = 2\pi f L$) verified against AC RMS voltmeter and ammeter readings.
+### What Is Next (Milestone 2 — Main Window and Canvas)
+- Dockable main window layout (`QMainWindow`, `QDockWidget`).
+- Component palette with categories, search box, and drag-and-drop ghost preview with grid snapping.
+- Interactive schematic canvas (`QGraphicsView` / `QGraphicsScene`): grid, zoom, pan, box selection, rotate (`R`), flip (`F`), delete, copy/paste, undo/redo (`QUndoStack`), right-angle wire routing, and junction dots.
+- Worker thread (`QThread`) connecting Run / Pause / Stop to the MNA engine without freezing the UI.
+- Live problem highlighting on the canvas, clickable switch with animated lever, glowing lightbulb, and live voltmeter/ammeter readouts.
 
 ### Known Issues & Limitations
-- Only DC analysis and Step A components are active so far; reactive components (`Capacitor`, `Inductor`), `ACVoltageSource`, and transient integration are scheduled for Milestone 1 Step B.
-- No graphical user interface yet (scheduled for Milestone 2).
+- Inductive kickback currently models the $10\text{ pF}$ switch contact capacitance and raises the `"Inductive kickback, consider a flyback diode"` warning, without clamping the voltage spike until an arc/breakdown clamp threshold is approved.
+- No graphical UI yet (Milestone 2).
 
 ### How to Run the App and Tests
 
 ```powershell
-# Run the full test suite (46 tests)
+# Run the full test suite (55 tests)
 .\.venv\Scripts\pytest.exe
 
-# Run the headless Step A engine demo
-$env:PYTHONPATH = "src"
+# Run the headless Milestone 1 engine demo (no PYTHONPATH needed)
 .\.venv\Scripts\python.exe -m circuitsim.main
 ```

@@ -20,6 +20,12 @@ dev = [
     "pytest>=8.0.0",
 ]
 
+[project.scripts]
+circuitsim = "circuitsim.main:run_demo"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

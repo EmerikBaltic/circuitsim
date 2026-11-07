@@ -9,16 +9,23 @@ from circuitsim.engine.errors import (
     VoltageSourceLoopError,
 )
 from circuitsim.engine.netlist import Circuit
-from circuitsim.engine.solver import MNASolver, SolveResult
+from circuitsim.engine.solver import (
+    IntegrationMethod,
+    MNASolver,
+    SolveResult,
+    TransientResult,
+)
 
 __all__ = [
     "Circuit",
     "CircuitError",
     "CircuitWarning",
     "FloatingNodeError",
+    "IntegrationMethod",
     "MNASolver",
     "NoGroundError",
     "SingularMatrixError",
     "SolveResult",
+    "TransientResult",
     "VoltageSourceLoopError",
 ]

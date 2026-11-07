@@ -1,13 +1,19 @@
-"""Circuit container and topological validator for Modified Nodal Analysis."""
+"""Circuit container, topological validator, and Thévenin resistance calculator."""
 
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import numpy as np
 
 from circuitsim.components.base import Component
+from circuitsim.components.capacitor import Capacitor
 from circuitsim.components.ground import Ground
-from circuitsim.components.meters import Ammeter
-from circuitsim.components.sources import DCVoltageSource
+from circuitsim.components.inductor import Inductor
+from circuitsim.components.lightbulb import Lightbulb
+from circuitsim.components.meters import Ammeter, Voltmeter
+from circuitsim.components.resistor import Resistor
+from circuitsim.components.sources import ACVoltageSource, DCVoltageSource
+from circuitsim.components.switch import Switch
 from circuitsim.engine.errors import (
     CircuitWarning,
     FloatingNodeError,
@@ -55,6 +61,8 @@ class Circuit:
         - Validates circuit topology before solving (missing ground, floating
           nodes, ideal voltage-source loops, and ammeters in parallel with
           voltage sources).
+        - Computes exact DC Thévenin resistance between any two nodes with all
+          independent sources zeroed.
     """
 
     def __init__(self) -> None:
@@ -118,6 +126,108 @@ class Circuit:
         gnd = self.grounded_nodes()
         return sorted(n for n in self.all_nodes() if n not in gnd)
 
+    def thevenin_resistance(
+        self,
+        node_a: str,
+        node_b: str,
+        *,
+        exclude_component: str | None = None,
+    ) -> float:
+        """Compute the DC Thévenin resistance between `node_a` and `node_b`.
+
+        All independent voltage sources are zeroed (replaced by their `r_internal`,
+        or a short circuit if `r_internal == 0`), independent current sources are
+        opened (0 A), and capacitors are treated as open circuits.
+
+        Args:
+            node_a: First terminal node name.
+            node_b: Second terminal node name.
+            exclude_component: Optional component name (such as the target inductor
+                itself) to exclude when measuring the external network resistance.
+        """
+        gnd_nodes = self.grounded_nodes()
+        if node_a == node_b or (node_a in gnd_nodes and node_b in gnd_nodes):
+            return 0.0
+
+        non_gnd = self.non_ground_nodes()
+        node_to_idx = {n: i for i, n in enumerate(non_gnd)}
+
+        # Voltage sources become 0 V constraints with series r_internal.
+        # Any other inductor with dcr == 0 also acts as a 0 V DC short branch.
+        zeroed_vs_branches: list[tuple[str, str, float]] = []
+        for comp in self._components.values():
+            if comp.name == exclude_component or isinstance(comp, (Ground, Capacitor)):
+                continue
+            if isinstance(comp, (DCVoltageSource, ACVoltageSource)):
+                zeroed_vs_branches.append((comp.nodes[0], comp.nodes[1], comp.r_internal))
+            elif isinstance(comp, Inductor) and comp.dcr == 0.0:
+                zeroed_vs_branches.append((comp.nodes[0], comp.nodes[1], 0.0))
+
+        n_nodes = len(non_gnd)
+        n_vs = len(zeroed_vs_branches)
+        dim = n_nodes + n_vs
+        if dim == 0:
+            return 0.0
+
+        def build_matrix(gmin_val: float) -> np.ndarray:
+            mat = np.zeros((dim, dim), dtype=np.float64)
+            for idx in range(n_nodes):
+                mat[idx, idx] += gmin_val
+
+            for comp in self._components.values():
+                if comp.name == exclude_component or isinstance(
+                    comp, (Ground, Capacitor, DCVoltageSource, ACVoltageSource)
+                ):
+                    continue
+                g = 0.0
+                if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter)):
+                    g = comp.conductance
+                elif isinstance(comp, Inductor) and comp.dcr > 0.0:
+                    g = 1.0 / comp.dcr
+
+                if g > 0.0:
+                    ia = node_to_idx.get(comp.nodes[0])
+                    ib = node_to_idx.get(comp.nodes[1])
+                    if ia is not None:
+                        mat[ia, ia] += g
+                    if ib is not None:
+                        mat[ib, ib] += g
+                    if ia is not None and ib is not None:
+                        mat[ia, ib] -= g
+                        mat[ib, ia] -= g
+
+            for k, (na, nb, r_int) in enumerate(zeroed_vs_branches):
+                row_k = n_nodes + k
+                ia = node_to_idx.get(na)
+                ib = node_to_idx.get(nb)
+                if ia is not None:
+                    mat[ia, row_k] += 1.0
+                    mat[row_k, ia] += 1.0
+                if ib is not None:
+                    mat[ib, row_k] -= 1.0
+                    mat[row_k, ib] -= 1.0
+                if r_int > 0.0:
+                    mat[row_k, row_k] += r_int
+
+            return mat
+
+        rhs = np.zeros(dim, dtype=np.float64)
+        idx_a = node_to_idx.get(node_a)
+        idx_b = node_to_idx.get(node_b)
+        if idx_a is not None:
+            rhs[idx_a] += 1.0
+        if idx_b is not None:
+            rhs[idx_b] -= 1.0
+
+        try:
+            sol = np.linalg.solve(build_matrix(0.0), rhs)
+        except np.linalg.LinAlgError:
+            sol = np.linalg.solve(build_matrix(1e-12), rhs)
+
+        va = float(sol[idx_a]) if idx_a is not None else 0.0
+        vb = float(sol[idx_b]) if idx_b is not None else 0.0
+        return max(0.0, va - vb)
+
     def validate_topology(self) -> list[CircuitWarning]:
         """Validate the circuit graph for fatal errors and non-fatal warnings.
 
@@ -144,7 +254,6 @@ class Circuit:
         if not non_ground_comps:
             return warnings
 
-        # Count terminal connections per node (treating all grounded nodes as one node).
         CANONICAL_GND = "__GND__"
 
         def canonical(node: str) -> str:
@@ -185,13 +294,8 @@ class Circuit:
         # 3. Check for ideal voltage-source loops using Union-Find.
         vs_dsu = _DisjointSet()
         for comp in non_ground_comps:
-            # Ideal voltage source: DCVoltageSource (or ACVoltageSource in Step B)
-            # with zero internal series resistance.
-            is_ideal_vs = (
-                isinstance(comp, DCVoltageSource) and comp.r_internal == 0.0
-            ) or (
-                getattr(comp, "component_type", "") == "ac_voltage"
-                and getattr(comp, "r_internal", 0.0) == 0.0
+            is_ideal_vs = isinstance(comp, (DCVoltageSource, ACVoltageSource)) and (
+                comp.r_internal == 0.0
             )
             if is_ideal_vs:
                 c_a = canonical(comp.nodes[0])
@@ -202,15 +306,10 @@ class Circuit:
                         message="Voltage sources in a loop",
                     )
 
-        # 4. Check for ammeters connected directly across a rigid voltage difference
-        #    (e.g. in parallel with a voltage source or shorted across ground).
-        #    Also include voltage sources with small internal resistance in a separate
-        #    check so the user still gets warned if they put an ammeter across a battery.
+        # 4. Check for ammeters connected directly across a rigid voltage difference.
         battery_dsu = _DisjointSet()
         for comp in non_ground_comps:
-            if isinstance(comp, DCVoltageSource) or (
-                getattr(comp, "component_type", "") == "ac_voltage"
-            ):
+            if isinstance(comp, (DCVoltageSource, ACVoltageSource)):
                 battery_dsu.union(canonical(comp.nodes[0]), canonical(comp.nodes[1]))
 
         for comp in non_ground_comps:
