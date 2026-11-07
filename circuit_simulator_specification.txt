@@ -1,0 +1,477 @@
+================================================================================
+ ELECTRICAL CIRCUIT SIMULATOR - DESKTOP APPLICATION SPECIFICATION
+================================================================================
+
+
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+  1. Recommended language and stack
+  2. Main window layout
+  3. Component palette and canvas behaviour
+  4. Double-click properties menu
+  5. Component models
+  6. Saved parts bar (10 slots)
+  7. Oscilloscope
+  8. Simulation engine
+  9. Extra recommended features
+ 10. Project structure
+ 11. Testing and verification
+ 12. Development roadmap
+
+
+================================================================================
+ 1. RECOMMENDED LANGUAGE AND STACK
+================================================================================
+
+Best choice: C++20 with Qt 6 (Widgets).
+
+  Language ............ C++20
+                        Fastest numerical performance, full control over the
+                        solver.
+
+  UI framework ........ Qt 6 Widgets
+                        Mature desktop toolkit: docking panels, dialogs,
+                        shortcuts, menus, high-DPI support, native look.
+
+  Circuit canvas ...... QGraphicsView / QGraphicsScene
+                        Built for editors: zoom, pan, selection, snapping,
+                        thousands of items.
+
+  Oscilloscope view ... QOpenGLWidget (or QPainter for a simpler first version)
+                        Smooth 60 fps waveform rendering.
+
+  Math library ........ Eigen (dense LU for small circuits)
+                        SuiteSparse KLU or Eigen SparseLU for larger circuits.
+
+  Threading ........... QThread, with a lock-free ring buffer from the solver
+                        to the UI, so the UI never freezes while simulating.
+
+  File format ......... JSON (.circ) via QJsonDocument. Human-readable and easy
+                        to version.
+
+  Settings / parts .... QSettings plus JSON in the OS app-data folder.
+
+  Build system ........ CMake
+
+  Installers .......... Windows: windeployqt + Inno Setup
+                        macOS:   .dmg
+                        Linux:   AppImage
+
+Why this combination:
+  - Speed: native compiled code, no interpreter or runtime overhead.
+  - UI simplicity: Qt provides docking windows, property dialogs and the
+    canvas framework out of the box.
+  - Design quality: Qt style sheets (QSS) allow dark/light themes and a custom
+    look.
+
+Alternatives:
+  - C# with Avalonia UI: easier to learn, quick to develop. Slightly slower
+    solver, still fine for circuits under about 500 components.
+  - Python with PySide6: fastest for prototyping, but the solver needs NumPy
+    or a C++ extension to keep up with real-time scope updates.
+  - Rust with egui: fast, but a less polished look. Not recommended for an app
+    this UI-heavy.
+
+
+================================================================================
+ 2. MAIN WINDOW LAYOUT
+================================================================================
+
++----------------------------------------------------------------------------+
+| File  Edit  View  Simulation  Instruments  Help                            |  Menu bar
++----------------------------------------------------------------------------+
+| [New][Open][Save] [Undo][Redo]     [Run][Pause][Stop]   speed              |  Toolbar
++----------------------------------------------------------------------------+
+| SAVED PARTS:  [1][2][3][4][5][6][7][8][9][10]                              |  10-slot bar
++--------------+-----------------------------------+-------------------------+
+| COMPONENT    |                                   | PROPERTIES / INFO       |
+| PALETTE      |         CIRCUIT CANVAS            | PANEL                   |
+| (search +    |   (grid, zoom, pan, wires)        | (selected part values)  |
+|  categories) |                                   |                         |
++--------------+-----------------------------------+-------------------------+
+| OSCILLOSCOPE (dockable: bottom, floating, or on a second monitor)          |
++----------------------------------------------------------------------------+
+| Status bar: sim time, step size, node count, warnings                      |
++----------------------------------------------------------------------------+
+
+All panels are QDockWidgets: the user can detach, rearrange, or move the
+oscilloscope to a second monitor. The layout is saved and restored on restart.
+
+
+================================================================================
+ 3. COMPONENT PALETTE AND CANVAS BEHAVIOUR
+================================================================================
+
+3.1 Component palette (drag and drop)
+--------------------------------------------------------------------------------
+A left-side panel with collapsible categories and a search box. The user drags
+a component onto the canvas; a ghost preview follows the cursor and snaps to
+the grid.
+
+  Sources ............. DC voltage source
+                        AC voltage source (sine, square, triangle, sawtooth,
+                        pulse, with DC offset)
+                        DC current source
+                        Ground (reference node)
+
+  Passive ............. Resistor, capacitor, inductor, potentiometer,
+                        transformer
+
+  Switches ............ On/off switch (SPST), SPDT switch, push button
+
+  Loads ............... Lightbulb, LED, buzzer or motor (later phase)
+
+  Semiconductors ...... Diode, Zener diode, BJT (NPN/PNP), MOSFET (N/P),
+  (phase 4)             op-amp
+
+  Instruments ......... Voltmeter, ammeter, oscilloscope (4 channels),
+                        function generator
+
+  Misc ................ Wire junction, text label
+
+3.2 Canvas behaviour
+--------------------------------------------------------------------------------
+  - Drag from palette to canvas. The drop snaps to the grid.
+  - Wires: click a terminal and drag to another terminal. Wires auto-route at
+    right angles. Dropping a wire end on another wire creates a junction dot.
+  - Keyboard: R = rotate, F = flip, Del = delete, Ctrl+C / Ctrl+V / Ctrl+X =
+    copy / paste / cut, Ctrl+Z / Ctrl+Y = undo / redo (unlimited depth, via
+    QUndoStack).
+  - Box selection, group move, mouse-wheel zoom, middle-click or Space+drag to
+    pan.
+  - Live problem highlighting: no ground, floating node, voltage-source loop,
+    ammeter connected in parallel.
+
+
+================================================================================
+ 4. DOUBLE-CLICK PROPERTIES MENU
+================================================================================
+
+Double-clicking any component opens a dialog (or popup panel) with its
+editable values.
+
+Value entry uses engineering notation inside the app (case-sensitive):
+
+    p = pico (1e-12)     n = nano (1e-9)      u or µ = micro (1e-6)
+    m = milli (1e-3)     k = kilo (1e3)       M or meg = mega (1e6)
+    G = giga (1e9)
+
+    Examples: 4.7k   100n   2.2u   1M   10meg   15m
+
+Note on SPICE compatibility: standard SPICE is case-insensitive, where "m" and
+"M" both mean milli and mega is written "meg". The SPICE importer/exporter
+must follow SPICE rules and convert values to and from the app's convention.
+
+Editable properties by component:
+
+  Resistor ............ Resistance, tolerance %, power rating
+  Capacitor ........... Capacitance, initial voltage, ESR, voltage rating
+  Inductor ............ Inductance, winding resistance (DCR), initial current,
+                        saturation current (advanced). Also displays X_L and
+                        the time constant (see section 5.3).
+  DC source ........... Voltage, internal resistance
+  AC source ........... Waveform, amplitude, frequency, phase, DC offset,
+                        duty cycle
+  Switch .............. State (ON/OFF), contact resistance, optional keyboard
+                        shortcut, optional timer
+  Lightbulb ........... Rated wattage, rated voltage, cold-resistance ratio,
+                        burn-out on/off
+  LED / diode ......... Forward voltage, colour, max current
+  Transistor .......... Gain (beta), model preset
+  Voltmeter / ammeter . Internal resistance, display mode (DC, RMS, peak,
+                        instantaneous)
+  All components ...... Name/label, show value on canvas, colour
+
+While the simulation runs, the dialog also shows live voltage, current and
+power for that component. Changes apply immediately without restarting the
+simulation, so values can be changed while watching the oscilloscope.
+
+
+================================================================================
+ 5. COMPONENT MODELS (DETAILS THAT MUST BE CORRECT)
+================================================================================
+
+5.1 Lightbulb
+--------------------------------------------------------------------------------
+  - Hot resistance:  R_hot = V_rated^2 / P_rated
+    Example: 60 W at 120 V  ->  R_hot = 14400 / 60 = 240 ohm.
+  - Adjustable rated wattage (for example 1 W to 500 W) and rated voltage.
+  - Optional filament model: cold resistance is roughly 1/10 of hot
+    resistance, so a real bulb draws a large inrush current when switched on.
+    A filament temperature state (0 to 1) changes with a thermal time constant
+    (tens of milliseconds), and resistance interpolates between the cold and
+    hot values.
+  - Brightness = actual power dissipated / rated power, clamped for display:
+        0%        dark
+        100%      full glow
+        above 100%  over-bright, with a warning icon
+    Glow radius and colour animate smoothly (dim orange to warm white).
+  - Works on AC. At low frequencies, the brightness follows the power
+    waveform (visible flicker).
+  - Optional burn-out: if power stays above about 120% of rated for a set
+    time, the bulb fails. A reset option is available.
+
+5.2 Switch
+--------------------------------------------------------------------------------
+  - Simple ON/OFF: click the switch on the canvas to toggle it, with an
+    animated lever. A keyboard shortcut can be assigned per switch.
+  - ON is modelled as a small resistance (default 1 milliohm).
+    OFF is a very large resistance (default 1 gigaohm). This avoids singular
+    matrices.
+  - Optional timed switching (for example "close at t = 5 ms").
+
+5.3 Inductor (with adjustable resistance)
+--------------------------------------------------------------------------------
+  - Model: ideal inductor L in series with winding resistance R_DCR.
+    Both values are set in the double-click menu.
+  - Inductive reactance:  X_L = 2 * pi * f * L
+    Shown live in the properties dialog and info panel, using the frequency of
+    the AC source in the circuit, or a frequency typed in manually.
+  - Helper: the user can enter a desired X_L and a frequency, and the app
+    calculates L.
+  - Time constant:  tau = L / R_total  (also displayed).
+  - Time-domain companion model: trapezoidal integration. Backward Euler is
+    used for the first step and after any switching event, to prevent
+    numerical ringing.
+
+5.4 Switching inductive loads
+--------------------------------------------------------------------------------
+An ideal switch opening in series with an inductor would produce an infinite
+voltage spike. To keep the solver stable:
+  - The switch has a small parasitic capacitance across its contacts
+    (default 10 pF).
+  - The app shows a warning: "Inductive kickback, consider a flyback diode".
+  - The peak voltage is visible on the oscilloscope.
+
+5.5 Voltmeter
+--------------------------------------------------------------------------------
+  - Two probes (red and black), very high internal resistance (default
+    10 megaohm, adjustable).
+  - Modes: DC (average), AC RMS, peak, instantaneous. RMS is computed over a
+    sliding window covering a whole number of signal periods.
+  - It genuinely participates in the simulation as a resistor between its two
+    nodes. Readings are real results, not fake numbers.
+  - Negative readings are shown correctly (polarity-aware), and units
+    auto-range (mV, V, kV).
+
+5.6 Ammeter
+--------------------------------------------------------------------------------
+  - Inserted in series, with very low internal resistance (default 1 milliohm,
+    adjustable).
+  - Implementation: a small resistor, or a 0 V source whose branch current is
+    read directly from the MNA matrix.
+  - If placed in parallel across a voltage difference, it creates a near-short
+    circuit and the app warns the user.
+  - The sign of the current is shown, and units auto-range (uA, mA, A).
+
+
+================================================================================
+ 6. SAVED PARTS BAR (10 SLOTS)
+================================================================================
+
+  - A bar at the top with exactly 10 slots, numbered 1 to 10
+    (keyboard keys 1 to 0).
+  - To save: right-click a component on the canvas and choose "Save to slot",
+    or drag it onto a slot.
+  - Each slot stores the component type AND all its configured values.
+    Examples: "4.7 kohm 1% resistor", "10 mH inductor with 2 ohm DCR".
+  - To use: click a slot or press its key, then click on the canvas to place
+    a copy. Or drag the part out of the slot.
+  - Each slot shows an icon and a short value label (for example "4.7k").
+  - Right-click a slot to rename, clear or swap it.
+  - Saving to an occupied slot asks for confirmation before overwriting.
+  - Stored as a JSON file in the user's app-data folder, so it persists
+    between sessions. Export and import of the slot set is supported.
+
+
+================================================================================
+ 7. OSCILLOSCOPE
+================================================================================
+
+7.1 Hardware features
+--------------------------------------------------------------------------------
+  Channels: 4 (CH1 yellow, CH2 cyan, CH3 magenta, CH4 green).
+
+  Probes:
+    - Drag a probe tip from the scope onto any node or wire to attach it.
+      A coloured marker appears on the circuit at the attached point.
+    - The ground clip always references circuit ground. For differential
+      measurements, use the CH1 - CH2 math function.
+    - Probe attenuation: 1x or 10x.
+
+  Vertical controls (per channel):
+    - Volts/div
+    - Vertical position
+    - Coupling: DC, AC, GND
+    - Invert
+    - Channel on/off
+
+  Horizontal controls:
+    - Time/div
+    - Horizontal position (delay)
+    - Zoom window
+
+  Trigger:
+    - Source (CH1 to CH4)
+    - Edge: rising or falling
+    - Level, with an on-screen marker
+    - Modes: Auto, Normal, Single
+    - Holdoff
+
+  Display modes:
+    - Y-T (normal)
+    - X-Y (Lissajous figures)
+    - Math: CH1+CH2, CH1-CH2, CH1*CH2, FFT (Hann window, linear or dB scale)
+    - Persistence, grid on/off, brightness
+
+  Automatic measurements:
+    Vpp, Vmax, Vmin, Vavg, Vrms, frequency, period, rise time, fall time,
+    duty cycle, phase between channels.
+
+  Cursors:
+    Two horizontal and two vertical cursors showing delta V, delta t and
+    1/delta t.
+
+  Other:
+    Run/Stop, Single capture, Auto-set, screenshot export (PNG), data export
+    (CSV).
+
+7.2 Linking the scope to the solver
+--------------------------------------------------------------------------------
+The scope depends on the simulation time step, so this is handled explicitly:
+  - Solver step: dt <= (time/div) / 100, giving at least 100 samples per
+    division.
+  - Default time/div range: 1 us/div to 10 s/div. Faster ranges (down to
+    10 ns/div) are available in a "high-resolution mode" that slows the
+    simulation.
+  - The solver writes samples into a ring buffer. The scope reads from it and
+    interpolates between samples for accurate triggering.
+  - The status bar shows when the simulation cannot keep up with real time.
+
+7.3 User interface
+--------------------------------------------------------------------------------
+Two skins, switchable in settings:
+  - "Modern": sliders and buttons.
+  - "Classic": front panel with draggable and scrollable knobs.
+The panel can be docked, floating or fullscreen.
+
+
+================================================================================
+ 8. SIMULATION ENGINE
+================================================================================
+
+  - Method: Modified Nodal Analysis (MNA), the same technique SPICE uses. The
+    matrix is built from component "stamps".
+  - Solvers: LU decomposition (Eigen) for small circuits, a sparse solver for
+    larger ones.
+  - Transient analysis: trapezoidal or Backward Euler integration with
+    adaptive time steps. Capacitors and inductors become companion models
+    (a conductance plus a current source) at each step.
+  - Nonlinear devices (diodes, transistors, bulb filament): Newton-Raphson
+    iteration with voltage limiting and a maximum iteration count.
+  - Numerical safety: a tiny conductance (GMIN, about 1e-12 S) from every node
+    to ground prevents singular matrices.
+  - Analyses: real-time transient (default), DC operating point, AC sweep
+    (Bode plot).
+  - Threading: the solver runs in its own QThread. The UI reads results
+    through a thread-safe ring buffer and redraws at 60 Hz.
+  - Simulation speed control: real-time, slow motion, fast.
+  - Errors reported in plain language:
+        "No ground connected"
+        "Voltage sources in a loop"
+        "Node X is floating"
+        "Simulation did not converge at t = ..."
+
+
+================================================================================
+ 9. EXTRA RECOMMENDED FEATURES
+================================================================================
+
+   1. Current-flow animation: moving dots along wires, speed proportional to
+      current, colour showing voltage.
+   2. Example library: RC filter, voltage divider, RLC resonance, rectifier,
+      LED circuit, transistor amplifier. One click to load.
+   3. Hover tooltips: node voltage and branch current shown on hover.
+   4. Live measurement table: all voltages, currents and powers in one
+      dockable panel.
+   5. Overload indication: components glow red when exceeding power or
+      voltage ratings, with an optional "burn out" mode.
+   6. Standard value snapping: E12, E24 and E96 series for resistors and
+      capacitors.
+   7. Graph panel: plot any voltage or current versus time without needing an
+      oscilloscope.
+   8. Bode plot and parameter sweep (vary a value and plot the result).
+   9. SPICE netlist import/export for comparison with LTspice or ngspice.
+  10. Export: PNG, SVG and PDF of the schematic; CSV of waveforms.
+  11. Autosave and crash recovery, recent files list, native file dialogs.
+  12. Subcircuit blocks: collapse a group of components into one reusable
+      block.
+  13. Annotations: text labels, boxes and arrows.
+  14. Dark and light themes, colour-blind-safe palette, adjustable UI scale,
+      high-DPI support.
+  15. Tutorial mode with guided lessons and checkable goals.
+  16. Multi-language UI through Qt's translation system.
+
+
+================================================================================
+ 10. PROJECT STRUCTURE (C++ / QT)
+================================================================================
+
+CircuitSim/
+  CMakeLists.txt
+  src/
+    main.cpp
+    app/            MainWindow, docks, menus, settings
+    canvas/         CircuitScene, CircuitView, WireItem, ComponentItem
+    components/     Resistor, Capacitor, Inductor, Bulb, Switch, Meters...
+    dialogs/        PropertiesDialog, value parser (4.7k, 100n...)
+    savedparts/     SavedPartsBar (10 slots, JSON persistence)
+    scope/          ScopeWidget, Trigger, Measurements, FFT
+    engine/         Netlist builder, MNA matrix, integrators, Newton solver
+    io/             JSON save/load, SPICE import/export, image export
+    resources/      icons, themes (QSS), example circuits
+  tests/            solver unit tests, parser tests
+
+
+================================================================================
+ 11. TESTING AND VERIFICATION
+================================================================================
+
+Verify the solver against known results BEFORE building the UI:
+
+  - RC charging:        V(t) = Vs * (1 - e^(-t / RC))
+  - RL current rise:    I(t) = (V / R) * (1 - e^(-t / tau)),  tau = L / R
+  - Voltage divider and series/parallel resistor networks.
+  - RLC resonance at:   f = 1 / (2 * pi * sqrt(L * C))
+  - Inductive reactance: X_L = 2 * pi * f * L, checked against the ammeter and
+    voltmeter readings in an AC circuit.
+  - Lightbulb: 60 W at 120 V must read 240 ohm hot, 0.5 A, brightness 100%.
+  - Cross-check against ngspice output for the same netlists.
+  - Value parser tests: "4.7k", "100n", "2.2u", "1M", "10meg", "15m".
+
+
+================================================================================
+ 12. DEVELOPMENT ROADMAP
+================================================================================
+
+  Phase 1 - Core
+      Main window, canvas, drag and drop, wiring, R/C/L, DC/AC source, ground,
+      MNA solver with tests, voltmeter, ammeter, properties dialog.
+
+  Phase 2 - Interactivity
+      Switch, lightbulb, 10-slot saved parts bar, undo/redo, save/load.
+
+  Phase 3 - Oscilloscope
+      Probes, 4 channels, trigger, measurements, cursors, X-Y, FFT.
+
+  Phase 4 - Semiconductors
+      Diode, LED, BJT, MOSFET, op-amp, Newton-Raphson solver.
+
+  Phase 5 - Polish
+      Current animation, examples, failure effects, themes, SPICE
+      import/export, installers.
+
+
+================================================================================
+ END OF SPECIFICATION
+================================================================================

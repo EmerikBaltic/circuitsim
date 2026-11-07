@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Packaging and build outputs
+build/
+dist/
+*.egg-info/
+*.spec
+*.zip
+*.exe
+installer_output/
+
+# OS / IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
