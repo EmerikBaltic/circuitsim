@@ -1,0 +1,18 @@
+{
+  "id": "switch",
+  "display_name": "SPST Switch",
+  "category": "Switches",
+  "style": "iec",
+  "grid_size": [4, 2],
+  "terminals": [
+    {"name": "a", "grid_pos": [-2, 0]},
+    {"name": "b", "grid_pos": [2, 0]}
+  ],
+  "label_offset": [0, -1.2],
+  "value_offset": [0, 1.1],
+  "default_svg": "switch_open.svg",
+  "states": {
+    "open": "switch_open.svg",
+    "closed": "switch_closed.svg"
+  }
+}

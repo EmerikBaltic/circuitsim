@@ -1,11 +1,19 @@
 """Entry point for the CircuitSim desktop application.
 
-In Milestone 1, the simulation engine operates headlessly without a Qt UI.
-Running this module executes both a DC demonstration and a transient RLC / AC
-demonstration and prints the solved results to the console.
+Usage:
+    # Launch the interactive PySide6 desktop schematic editor:
+    python -m circuitsim.main
+
+    # Run the headless Milestone 1 CLI simulation demo:
+    python -m circuitsim.main --demo
 """
 
 from __future__ import annotations
+
+import argparse
+import sys
+
+from PySide6.QtCore import QPointF
 
 from circuitsim.components import (
     ACVoltageSource,
@@ -25,7 +33,6 @@ from circuitsim.engine import Circuit, MNASolver
 
 def run_demo() -> int:
     """Run a quick headless DC and Transient demonstration of the Milestone 1 engine."""
-    # 1. DC Operating Point Demo
     dc_circuit = Circuit()
     dc_circuit.add(DCVoltageSource("V1", "in", "0", voltage=120.0))
     dc_circuit.add(Ammeter("A1", "in", "mid"))
@@ -52,7 +59,6 @@ def run_demo() -> int:
     print(f"  Bulb resistance   : {bulb.effective_resistance():.2f} Ohm")
     print(f"  Bulb brightness   : {bulb.brightness_percent:.1f} %")
 
-    # 2. Transient AC RL + Capacitor Demo
     ac_circuit = Circuit()
     ac_circuit.add(
         ACVoltageSource(
@@ -85,5 +91,39 @@ def run_demo() -> int:
     return 0
 
 
+def run_gui() -> int:
+    """Launch the interactive PySide6 desktop main window."""
+    from PySide6.QtWidgets import QApplication
+    from circuitsim.app.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = MainWindow()
+
+    # Place a few sample IEC components on the grid so the user can immediately
+    # see and interact with the schematic canvas on launch.
+    scene = window.circuit_scene
+    scene.place_new_component("dc_voltage", QPointF(-160.0, -40.0))
+    scene.place_new_component("switch", QPointF(-40.0, -40.0))
+    scene.place_new_component("resistor", QPointF(80.0, -40.0))
+    scene.place_new_component("lightbulb", QPointF(200.0, -40.0))
+    scene.place_new_component("ground", QPointF(0.0, 60.0))
+
+    window.show()
+    return app.exec()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="CircuitSim Desktop Application")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Run the headless CLI simulation demo and exit.",
+    )
+    args = parser.parse_args(argv)
+    if args.demo:
+        return run_demo()
+    return run_gui()
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_demo())
+    raise SystemExit(main())

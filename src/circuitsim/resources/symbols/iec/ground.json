@@ -1,0 +1,14 @@
+{
+  "id": "ground",
+  "display_name": "Ground",
+  "category": "Sources",
+  "style": "iec",
+  "grid_size": [2, 2],
+  "terminals": [
+    {"name": "gnd", "grid_pos": [0, -1]}
+  ],
+  "label_offset": [0, 1.1],
+  "value_offset": [0, 1.5],
+  "default_svg": "ground.svg",
+  "states": {}
+}

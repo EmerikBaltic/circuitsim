@@ -1,0 +1,15 @@
+{
+  "id": "dc_current",
+  "display_name": "DC Current Source",
+  "category": "Sources",
+  "style": "iec",
+  "grid_size": [4, 2],
+  "terminals": [
+    {"name": "pos", "grid_pos": [-2, 0]},
+    {"name": "neg", "grid_pos": [2, 0]}
+  ],
+  "label_offset": [0, -1.2],
+  "value_offset": [0, 1.2],
+  "default_svg": "dc_current.svg",
+  "states": {}
+}

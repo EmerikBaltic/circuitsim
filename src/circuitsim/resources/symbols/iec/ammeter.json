@@ -1,0 +1,15 @@
+{
+  "id": "ammeter",
+  "display_name": "Ammeter",
+  "category": "Instruments",
+  "style": "iec",
+  "grid_size": [4, 2],
+  "terminals": [
+    {"name": "pos", "grid_pos": [-2, 0]},
+    {"name": "neg", "grid_pos": [2, 0]}
+  ],
+  "label_offset": [0, -1.2],
+  "value_offset": [0, 1.2],
+  "default_svg": "ammeter.svg",
+  "states": {}
+}
