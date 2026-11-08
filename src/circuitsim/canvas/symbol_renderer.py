@@ -104,6 +104,8 @@ class SymbolLibrary:
         show_terminals: bool = True,
         terminal_color: str = "#58A6FF",
         lever_angle_deg: float | None = None,
+        rotation_deg: int = 0,
+        flipped_h: bool = False,
     ) -> bool:
         """Paint the symbol centered at `(0, 0)` in `painter` coordinates.
 
@@ -129,6 +131,8 @@ class SymbolLibrary:
                 state=state,
                 stroke_color=stroke_color,
                 lever_angle_deg=lever_angle_deg,
+                rotation_deg=rotation_deg,
+                flipped_h=flipped_h,
             )
 
         if show_terminals:
@@ -182,6 +186,8 @@ class SymbolLibrary:
         state: str | None = None,
         stroke_color: str = "#E6EDF3",
         lever_angle_deg: float | None = None,
+        rotation_deg: int = 0,
+        flipped_h: bool = False,
     ) -> None:
         """Built-in procedural IEC 60617 symbol drawing (stroke-width 2, no fill)."""
         painter.save()
@@ -281,6 +287,14 @@ class SymbolLibrary:
             painter.drawLine(QPointF(-40.0, 0.0), QPointF(-15.0, 0.0))
             painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
             painter.drawLine(QPointF(15.0, 0.0), QPointF(40.0, 0.0))
+
+            # The letter ('V' or 'A') must stay upright regardless of rotation or flip
+            painter.save()
+            if rotation_deg:
+                painter.rotate(-float(rotation_deg))
+            if flipped_h:
+                painter.scale(-1.0, 1.0)
+
             if component_id == "voltmeter":
                 painter.drawLine(QPointF(-5.0, -6.0), QPointF(0.0, 6.0))
                 painter.drawLine(QPointF(0.0, 6.0), QPointF(5.0, -6.0))
@@ -288,6 +302,7 @@ class SymbolLibrary:
                 painter.drawLine(QPointF(-5.0, 6.0), QPointF(0.0, -6.0))
                 painter.drawLine(QPointF(0.0, -6.0), QPointF(5.0, 6.0))
                 painter.drawLine(QPointF(-3.2, 1.5), QPointF(3.2, 1.5))
+            painter.restore()
 
         else:
             painter.drawRect(QRectF(-20.0, -10.0, 40.0, 20.0))

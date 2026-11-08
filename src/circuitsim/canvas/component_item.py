@@ -156,6 +156,7 @@ class ComponentItem(QGraphicsObject):
                 if isinstance(component, Switch)
                 else Qt.CursorShape.OpenHandCursor
             )
+            self.setZValue(20.0)
         else:
             self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             self.setOpacity(0.65)
@@ -512,6 +513,8 @@ class ComponentItem(QGraphicsObject):
             show_terminals=True,
             terminal_color=palette.terminal_dot,
             lever_angle_deg=lever_arg,
+            rotation_deg=self.rotation_deg,
+            flipped_h=self.flipped_h,
         )
         painter.restore()
 
@@ -523,6 +526,11 @@ class ComponentItem(QGraphicsObject):
             font = QFont("Segoe UI", 8)
             font.setBold(True)
             painter.setFont(font)
+            fm = painter.fontMetrics()
+
+            # Background plate for name label so intersecting wires never cut through text
+            lbl_box = fm.boundingRect(lbl_rect.toRect(), int(text_align), self.component.label)
+            painter.fillRect(QRectF(lbl_box).adjusted(-2.0, -1.0, 2.0, 1.0), QColor(palette.canvas_bg))
             painter.setPen(QColor(palette.symbol_text))
             painter.drawText(lbl_rect, text_align, self.component.label)
 
@@ -532,11 +540,15 @@ class ComponentItem(QGraphicsObject):
             ):
                 font.setBold(isinstance(self.component, (Voltmeter, Ammeter)))
                 painter.setFont(font)
+                fm_val = painter.fontMetrics()
                 val_text = (
                     self.live_display_value
                     if self.live_display_value is not None
                     else format_component_value_summary(self.component)
                 )
+                # Background plate for value readout so intersecting wires never cut through text
+                val_box = fm_val.boundingRect(val_rect.toRect(), int(text_align), val_text)
+                painter.fillRect(QRectF(val_box).adjusted(-3.0, -1.0, 3.0, 1.0), QColor(palette.canvas_bg))
                 painter.drawText(val_rect, text_align, val_text)
 
             # Over-bright or problem badge in upright coordinates
