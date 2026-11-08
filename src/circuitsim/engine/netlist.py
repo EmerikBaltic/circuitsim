@@ -246,7 +246,9 @@ class Circuit:
         warnings: list[CircuitWarning] = []
         gnd_nodes = self.grounded_nodes()
         if not gnd_nodes:
-            raise NoGroundError("No ground connected")
+            raise NoGroundError(
+                "No ground connected — Add a Ground part and wire it to the circuit"
+            )
 
         non_ground_comps = [
             c for c in self._components.values() if not isinstance(c, Ground)

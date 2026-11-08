@@ -380,7 +380,11 @@ class SimulationSession:
 
     def _convert_error_to_diagnostic(self, exc: CircuitError) -> ProblemDiagnostic:
         if isinstance(exc, NoGroundError):
-            all_comps = tuple(c.name for c in self.circuit.components)
+            all_comps_list = [c.name for c in self.circuit.components]
+            if self._connectivity is not None:
+                for cname in self._connectivity.component_nodes.keys():
+                    if cname not in all_comps_list:
+                        all_comps_list.append(cname)
             all_wires = (
                 tuple(self._connectivity.wire_to_node.keys())
                 if self._connectivity is not None
@@ -389,8 +393,11 @@ class SimulationSession:
             return ProblemDiagnostic(
                 code="no_ground",
                 severity="error",
-                message=str(exc) or "No ground connected",
-                component_names=all_comps,
+                message=(
+                    str(exc)
+                    or "No ground connected — Add a Ground part and wire it to the circuit"
+                ),
+                component_names=tuple(all_comps_list),
                 wire_ids=all_wires,
             )
         if isinstance(exc, FloatingNodeError):
@@ -453,6 +460,18 @@ class SimulationSession:
                             f"({comp.brightness_percent:.0f}% of rated {comp.rated_power:g} W)"
                         ),
                         component_names=(comp.name,),
+                    )
+                )
+
+        # Report any completely unconnected schematic components (ignored by solver)
+        if self._connectivity is not None:
+            for cname in self._connectivity.unconnected_components:
+                diags.append(
+                    ProblemDiagnostic(
+                        code="unconnected_component",
+                        severity="warning",
+                        message=f"{cname} is not connected and is ignored",
+                        component_names=(cname,),
                     )
                 )
         return diags

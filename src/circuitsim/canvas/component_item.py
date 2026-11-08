@@ -158,6 +158,8 @@ class ComponentItem(QGraphicsObject):
         self.live_display_value: str | None = None
         self.diagnostic_severity: str | None = None  # "error", "warning", or None
         self.diagnostic_message: str = ""
+        self.diagnostic_code: str = ""
+        self.is_unconnected: bool = False
 
         # Switch lever animation state
         self._lever_angle_deg: float = (
@@ -209,14 +211,28 @@ class ComponentItem(QGraphicsObject):
         self.theme = theme
         self.update()
 
+    def set_unconnected(self, unconnected: bool) -> None:
+        """Dim or restore the component visually when it has no wires connected."""
+        if self.is_unconnected == bool(unconnected):
+            return
+        self.is_unconnected = bool(unconnected)
+        if not self.is_ghost:
+            self.setOpacity(0.45 if self.is_unconnected else 1.0)
+        self.update()
+
     def set_diagnostic(
-        self, severity: str | None, message: str = ""
+        self, severity: str | None, message: str = "", *, code: str = ""
     ) -> None:
         """Set or clear canvas problem highlighting on this component."""
-        if self.diagnostic_severity == severity and self.diagnostic_message == message:
+        if (
+            self.diagnostic_severity == severity
+            and self.diagnostic_message == message
+            and self.diagnostic_code == code
+        ):
             return
         self.diagnostic_severity = severity
         self.diagnostic_message = message
+        self.diagnostic_code = code
         self.setToolTip(message if message else f"{self.component.name} ({self.metadata.display_name})")
         self.update()
 

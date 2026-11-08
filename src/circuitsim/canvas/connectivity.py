@@ -239,6 +239,7 @@ class ConnectivityResult:
     point_to_node: dict[PointPx, str] = field(default_factory=dict)
     junction_dots: set[PointPx] = field(default_factory=set)
     valid_wires: tuple[tuple[str, tuple[PointPx, ...]], ...] = ()
+    unconnected_components: tuple[str, ...] = ()
 
 
 class _UnionFind:
@@ -504,6 +505,26 @@ def extract_connectivity(
         point_to_node[jp] = root_to_node[uf.find(("junc", jp))]
 
     circuit = Circuit()
+    unconnected_list: list[str] = []
+    comp_is_unconnected: dict[str, bool] = {}
+
+    for spec in placed_components:
+        cname = spec.component.name
+        t_order = comp_term_order[cname]
+        is_unconnected = all(
+            len(groups.get(uf.find(("term", cname, tname)), ())) <= 1
+            for tname in t_order
+        )
+        comp_is_unconnected[cname] = is_unconnected
+        if is_unconnected:
+            unconnected_list.append(cname)
+
+    has_connected_non_ground = any(
+        not comp_is_unconnected[spec.component.name]
+        and spec.component.name not in ground_comp_names
+        for spec in placed_components
+    )
+
     for spec in placed_components:
         cname = spec.component.name
         t_order = comp_term_order[cname]
@@ -515,6 +536,13 @@ def extract_connectivity(
             ordered_nodes.append(node_name)
             point_to_node[comp_terminals[cname][tname]] = node_name
         component_nodes[cname] = term_map
+
+        # Ignore completely unconnected parts so they do not block simulation
+        # with a floating-node error (and an unwired Ground does not fake ground).
+        if comp_is_unconnected[cname] and (
+            has_connected_non_ground or cname in ground_comp_names
+        ):
+            continue
 
         cloned_comp = copy.deepcopy(spec.component)
         if isinstance(cloned_comp, Ground):
@@ -568,6 +596,7 @@ def extract_connectivity(
         point_to_node=point_to_node,
         junction_dots=junction_dots,
         valid_wires=tuple(canonical_wires),
+        unconnected_components=tuple(unconnected_list),
     )
 
 

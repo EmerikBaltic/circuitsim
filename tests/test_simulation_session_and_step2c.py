@@ -344,10 +344,74 @@ def test_isolated_junction_dot_not_on_any_wire_creates_no_net_or_warning() -> No
     assert frame.diagnostics == ()
 
 
+def test_unconnected_part_ignored_with_warning_vs_connected_floating_island_error() -> None:
+    """Item 4:
+    - A component with no wires at all (e.g. an unconnected lightbulb B1) is ignored
+      so the rest of the circuit runs, with an amber warning 'B1 is not connected and is ignored'.
+    - A group of connected parts that really have no path to ground raises a floating-node error.
+    """
+    base_placed = [
+        PlacedComponentSpec(
+            DCVoltageSource("V1", "a", "b", voltage=12.0),
+            center_px=(0, 0),
+            rotation_deg=90,
+        ),
+        PlacedComponentSpec(
+            Resistor("R1", "a", "b", resistance=1000.0),
+            center_px=(100, 0),
+            rotation_deg=90,
+        ),
+        PlacedComponentSpec(
+            Ground("GND1", "0"),
+            center_px=(0, 60),
+        ),
+        # Unconnected lightbulb placed off to the side with no wires
+        PlacedComponentSpec(
+            Lightbulb("B1", "a", "b", rated_power=60.0, rated_voltage=120.0),
+            center_px=(400, 200),
+        ),
+    ]
+    base_wires = [
+        WireSpec("w_top", ((0, -40), (100, -40))),
+        WireSpec("w_bot", ((0, 40), (100, 40))),
+    ]
+
+    session = SimulationSession.from_schematic(base_placed, base_wires)
+    frame = session.start()
+    assert frame.state == SimulationState.RUNNING
+    unconn_diags = [d for d in frame.diagnostics if d.code == "unconnected_component"]
+    assert len(unconn_diags) == 1
+    assert unconn_diags[0].severity == "warning"
+    assert unconn_diags[0].message == "B1 is not connected and is ignored"
+    assert unconn_diags[0].component_names == ("B1",)
+
+    # Now add a group of connected parts (R_isl1 and R_isl2 wired together) with no path to ground
+    island_placed = base_placed + [
+        PlacedComponentSpec(
+            Resistor("R_isl1", "a", "b", resistance=220.0),
+            center_px=(500, 0),
+            rotation_deg=90,
+        ),
+        PlacedComponentSpec(
+            Resistor("R_isl2", "a", "b", resistance=330.0),
+            center_px=(600, 0),
+            rotation_deg=90,
+        ),
+    ]
+    island_wires = base_wires + [
+        WireSpec("w_isl_top", ((500, -40), (600, -40))),
+        WireSpec("w_isl_bot", ((500, 40), (600, 40))),
+    ]
+    session_island = SimulationSession.from_schematic(island_placed, island_wires)
+    frame_island = session_island.start()
+    assert frame_island.state == SimulationState.ERROR
+    assert any(d.code == "floating_node" for d in frame_island.diagnostics)
+
+
 def test_problem_diagnostics_for_errors_and_warnings() -> None:
-    """Step 2C: Problem highlighting diagnostics for no ground, floating node,
+    """Step 2C & Item 4: Problem highlighting diagnostics for no ground, floating node,
     voltage-source loop, parallel ammeter, and inductive kickback."""
-    # 1. No ground
+    # 1. No ground (includes actionable hint)
     ckt_no_gnd = Circuit()
     ckt_no_gnd.add(DCVoltageSource("V1", "n1", "n2", voltage=5.0))
     ckt_no_gnd.add(Resistor("R1", "n1", "n2", resistance=100.0))
@@ -356,6 +420,8 @@ def test_problem_diagnostics_for_errors_and_warnings() -> None:
     assert f1.state == SimulationState.ERROR
     assert len(f1.diagnostics) == 1
     assert f1.diagnostics[0].code == "no_ground"
+    assert "No ground connected" in f1.diagnostics[0].message
+    assert "Add a Ground part and wire it to the circuit" in f1.diagnostics[0].message
     assert set(f1.diagnostics[0].component_names) == {"V1", "R1"}
 
     # 2. Floating node (disconnected island)

@@ -260,6 +260,12 @@ class CircuitScene(QGraphicsScene):
         """Recompute active junction dots (T-junctions + explicit junctions) and repaint."""
         res = self.extract_connectivity_result()
         self._active_junction_dots = res.junction_dots
+        unconn_set = set(res.unconnected_components)
+        has_connected = len(self._placed_items) > len(unconn_set)
+        for item in self._placed_items:
+            item.set_unconnected(
+                has_connected and item.component.name in unconn_set
+            )
         self.circuit_modified.emit()
         self.update()
 
@@ -923,7 +929,7 @@ class CircuitScene(QGraphicsScene):
     def clear_diagnostics(self) -> None:
         """Clear all problem highlighting on components and wires."""
         for item in self._placed_items:
-            item.set_diagnostic(None, "")
+            item.set_diagnostic(None, "", code="")
         for wire in self._wire_items:
             wire.set_diagnostic(None, "")
 
@@ -939,24 +945,29 @@ class CircuitScene(QGraphicsScene):
                     item.apply_telemetry(telem)
 
         # Map diagnostics to components and wires (error takes precedence over warning)
-        comp_diag: dict[str, tuple[str, str]] = {}
+        comp_diag: dict[str, tuple[str, str, str]] = {}
         wire_diag: dict[str, tuple[str, str]] = {}
+        unconnected_names: set[str] = set()
         for diag in frame.diagnostics:
+            if diag.code == "unconnected_component":
+                unconnected_names.update(diag.component_names)
             for cname in diag.component_names:
                 prev = comp_diag.get(cname)
                 if prev is None or prev[0] != "error":
-                    comp_diag[cname] = (diag.severity, diag.message)
+                    comp_diag[cname] = (diag.severity, diag.message, diag.code)
             for wid in diag.wire_ids:
                 prev_w = wire_diag.get(wid)
                 if prev_w is None or prev_w[0] != "error":
                     wire_diag[wid] = (diag.severity, diag.message)
 
         for item in self._placed_items:
-            d = comp_diag.get(item.component.name)
+            cname = item.component.name
+            item.set_unconnected(cname in unconnected_names)
+            d = comp_diag.get(cname)
             if d is not None:
-                item.set_diagnostic(d[0], d[1])
+                item.set_diagnostic(d[0], d[1], code=d[2])
             else:
-                item.set_diagnostic(None, "")
+                item.set_diagnostic(None, "", code="")
 
         for wire in self._wire_items:
             dw = wire_diag.get(wire.wire_id)
