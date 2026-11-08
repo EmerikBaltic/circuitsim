@@ -364,21 +364,46 @@ class ComponentItem(QGraphicsObject):
             terminals_px=self.terminal_scene_positions_px(),
         )
 
+    def selection_outline_rect_local(self) -> QRectF:
+        """Return the selection/problem outline rectangle in upright local coordinates."""
+        w_px, h_px = self.metadata.pixel_size
+        if self.rotation_deg in (90, 270):
+            return QRectF(
+                -float(h_px) / 2.0 - 3.0,
+                -float(w_px) / 2.0 - 3.0,
+                float(h_px) + 6.0,
+                float(w_px) + 6.0,
+            )
+        return QRectF(
+            -float(w_px) / 2.0 - 3.0,
+            -float(h_px) / 2.0 - 3.0,
+            float(w_px) + 6.0,
+            float(h_px) + 6.0,
+        )
+
     def _upright_label_and_value_rects(
         self,
     ) -> tuple[QRectF, QRectF, Qt.AlignmentFlag]:
-        """Compute upright (unrotated, unmirrored) label and value rectangles."""
+        """Compute upright (unrotated, unmirrored) label and value rectangles clear of the selection box."""
+        _w_px, h_px = self.metadata.pixel_size
         if self.rotation_deg in (90, 270):
-            # Symbol is vertical (40x80 px): place label and value upright to the right
-            lbl_rect = QRectF(18.0, -18.0, 96.0, 17.0)
-            val_rect = QRectF(18.0, 1.0, 110.0, 17.0)
+            # Symbol is vertical: place label and value upright to the right, clear of selection box
+            right_x = float(h_px) / 2.0 + 7.0
+            lbl_rect = QRectF(right_x, -18.0, 96.0, 17.0)
+            val_rect = QRectF(right_x, 1.0, 110.0, 17.0)
             align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             return lbl_rect, val_rect, align
 
         lbl_x = self.metadata.label_offset[0] * GRID_PITCH_PX
-        lbl_y = self.metadata.label_offset[1] * GRID_PITCH_PX
+        lbl_y = min(
+            self.metadata.label_offset[1] * GRID_PITCH_PX,
+            -float(h_px) / 2.0 - 14.0,
+        )
         val_x = self.metadata.value_offset[0] * GRID_PITCH_PX
-        val_y = self.metadata.value_offset[1] * GRID_PITCH_PX
+        val_y = max(
+            self.metadata.value_offset[1] * GRID_PITCH_PX,
+            float(h_px) / 2.0 + 14.0,
+        )
         lbl_rect = QRectF(lbl_x - 50.0, lbl_y - 9.0, 100.0, 18.0)
         val_rect = QRectF(val_x - 60.0, val_y - 9.0, 120.0, 18.0)
         return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
@@ -388,10 +413,10 @@ class ComponentItem(QGraphicsObject):
         max_dim = float(max(w_px, h_px))
         # Generous bounding box covering horizontal/vertical orientations and upright labels
         return QRectF(
-            -max_dim / 2.0 - 28.0,
-            -max_dim / 2.0 - 28.0,
-            max_dim + 150.0,
-            max_dim + 56.0,
+            -max_dim / 2.0 - 36.0,
+            -max_dim / 2.0 - 36.0,
+            max_dim + 160.0,
+            max_dim + 72.0,
         )
 
     def itemChange(
@@ -466,25 +491,25 @@ class ComponentItem(QGraphicsObject):
         if self.is_ghost:
             pen = QPen(QColor(palette.ghost_tint), 1.5, Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawRoundedRect(body_rect.adjusted(-4, -4, 4, 4), 4.0, 4.0)
+            painter.drawRoundedRect(body_rect.adjusted(-3, -3, 3, 3), 4.0, 4.0)
         elif self.diagnostic_severity == "error":
             err_col = QColor("#FF5252")
             fill_col = QColor(255, 82, 82, 32)
             painter.setPen(QPen(err_col, 2.0, Qt.PenStyle.SolidLine))
             painter.setBrush(QBrush(fill_col))
-            painter.drawRoundedRect(body_rect.adjusted(-5, -5, 5, 5), 5.0, 5.0)
+            painter.drawRoundedRect(body_rect.adjusted(-3, -3, 3, 3), 5.0, 5.0)
             painter.setBrush(Qt.BrushStyle.NoBrush)
         elif self.diagnostic_severity == "warning":
             warn_col = QColor("#FFA726")
             fill_col = QColor(255, 167, 38, 28)
             painter.setPen(QPen(warn_col, 1.8, Qt.PenStyle.DashLine))
             painter.setBrush(QBrush(fill_col))
-            painter.drawRoundedRect(body_rect.adjusted(-5, -5, 5, 5), 5.0, 5.0)
+            painter.drawRoundedRect(body_rect.adjusted(-3, -3, 3, 3), 5.0, 5.0)
             painter.setBrush(Qt.BrushStyle.NoBrush)
         elif self.isSelected():
             pen = QPen(QColor(palette.selection_accent), 1.5, Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawRoundedRect(body_rect.adjusted(-4, -4, 4, 4), 4.0, 4.0)
+            painter.drawRoundedRect(body_rect.adjusted(-3, -3, 3, 3), 4.0, 4.0)
 
         stroke_col = palette.ghost_tint if self.is_ghost else palette.symbol_stroke
         if self.diagnostic_severity == "error" and not self.is_ghost:

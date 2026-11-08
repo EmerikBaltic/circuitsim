@@ -495,7 +495,7 @@ from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 app = QApplication(sys.argv)
 lib = SymbolLibrary()
 
-# 1. Verify upright labels and values under all rotations & flips (Addition #3)
+# 1. Verify upright labels and values under all rotations & flips (Addition #3 & Item 5)
 comp_item = ComponentItem(Resistor("R1", "a", "b", resistance=1000.0), lib)
 for rot in (0, 90, 180, 270):
     for flip in (False, True):
@@ -503,6 +503,10 @@ for rot in (0, 90, 180, 270):
         comp_item.set_flipped_h(flip)
         assert comp_item.transform().isIdentity(), f"Expected identity QGraphicsItem transform for rot={rot}, flip={flip}"
         assert comp_item.effective_text_angle_deg() == 0.0, f"Text angle not upright for rot={rot}, flip={flip}"
+        sel_rect = comp_item.selection_outline_rect_local()
+        lbl_rect, val_rect, _ = comp_item._upright_label_and_value_rects()
+        assert not sel_rect.intersects(lbl_rect), f"Selection box {sel_rect} overlaps label {lbl_rect} at rot={rot}"
+        assert not sel_rect.intersects(val_rect), f"Selection box {sel_rect} overlaps value {val_rect} at rot={rot}"
 
 # 2. Verify MainWindow toolbar Speed dropdown is visible at 1024x768 (Addition #5)
 win = MainWindow()
