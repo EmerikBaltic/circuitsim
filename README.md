@@ -17,7 +17,7 @@ It is designed for electrical engineering students and hobbyists who want both a
   - Dockable **PySide6 (Qt 6)** Main Window with Dark & Light themes (`Ctrl+T`), searchable Component Palette, and IEC 60617 symbol library (hybrid custom SVG + procedural renderer).
   - Grid-snapped ($20\text{ px}$) schematic canvas with right-angle wire routing, Union-Find netlist extraction (`CircuitScene.build_circuit()`), explicit junction dots (`J`), attached wire re-routing on move/rotate/flip, and full `QUndoStack` Undo/Redo (`Ctrl+Z` / `Ctrl+Y`).
   - Background `QThread` simulation worker (`SimulationWorkerController` + pure-Python `SimulationSession`) with live auto-ranged Voltmeter/Ammeter readouts, animated clickable Switch, real-power Lightbulb glow, double-click live value editing (supporting both dot and single-comma decimals like `5,65 G`), and red/amber canvas problem highlighting.
-  - **95 automated unit and UI tests** passing (`pytest`).
+  - **119 automated unit and UI tests** passing (`pytest`), including save/load of `.circ` files (Milestone 3, Step 3A).
 - **Milestone 3 (Save/Load `.circ`, 10-Slot Saved Parts Bar & Full Properties Dialog — Up Next)**
 
 ---
@@ -30,6 +30,19 @@ It is designed for electrical engineering students and hobbyists who want both a
 4. **Edit Component Values**: **Double-click** any component on the canvas to open its value editor. Type values using engineering prefixes (`4.7k`, `5,65 G`, `100n`, `10K`)—a live preview (`= 4.7 kΩ`) appears below the input, and changes apply immediately even while the simulation is running (and can be undone with **`Ctrl+Z`**).
 5. **Run / Pause / Stop**: Use the top toolbar or keyboard shortcuts—**Run (`F5`)**, **Pause / Resume (`F6` or `Space`)**, and **Stop (`F7`)**—and choose simulation speed (`1x Real-Time`, `0.1x Slow`, `10x Fast`).
 6. **Toggle Switches Live**: Click directly on any **Switch** on the canvas while running to animate its lever open/closed and watch meter readings and lightbulb brightness respond in real time.
+
+---
+
+## Saving and Opening Circuits
+
+Circuits are stored as `.circ` files (plain JSON text that you can open in any editor).
+
+- **Save**: `Ctrl+S` (or the toolbar **Save** button). The first time you are asked for a name; `Ctrl+Shift+S` (**Save As**) always asks.
+- **Open**: `Ctrl+O`. **New**: `Ctrl+N`.
+- The window title shows the file name and an asterisk (`*`) when there are unsaved changes. CircuitSim asks before New, Open or closing if you would lose changes.
+- Saving is safe: the file is written to a temporary file first and only then swapped in, and the previous version is kept as `yourfile.circ.bak`.
+- A damaged, empty or unknown file (or one made by a newer CircuitSim) shows a friendly message and leaves your current circuit untouched.
+- Saved with the file: parts, values, labels, rotation/flip, wires, junction dots, theme, zoom, view position and simulation speed.
 
 ---
 

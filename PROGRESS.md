@@ -1,6 +1,6 @@
 # Project Progress — CircuitSim
 
-## Current Status: Milestone 2 Complete (Step 2C Finished)
+## Current Status: Milestone 2 Complete, Milestone 3 Step 3A (Save/Load) Done
 
 ### What Is Done
 - **Environment, Licensing & Editable Package Installation**:
@@ -31,7 +31,17 @@
 - **Unit Test Suite (`tests/`)**:
   - **95 passing tests** (including split analytic meter/switch/live-edit tests `6a`, value edit Undo/Redo while stopped and running `6b`, clean worker `QThread` shutdown on window close `6c`, real canvas item/wire highlight colours `6d`, and a 30-resistor ladder + RC load UI responsiveness benchmark `6e`).
 
+- **Milestone 3 - Step 3A: Save / Load `.circ` Files (done)**:
+  - [`src/circuitsim/io/circ_serializer.py`](src/circuitsim/io/circ_serializer.py) (no Qt): versioned JSON (`"format": "circuitsim"`, `"schema_version": 1`) storing components (type, name, label, show_value, position, rotation, flip, parameters, extra settings), wires, junction dots and view state (theme, zoom, pan, simulation speed). Strict validation with plain-language `CircuitFileError` messages (empty, truncated, wrong format, newer version, bad values).
+  - Atomic save (temp file in the same folder, flush to disk, then `os.replace`) with one backup `name.circ.bak`.
+  - `CircuitScene.load_document` builds everything first and swaps only if it all worked; `CircuitScene.to_document` snapshots the schematic. Loading clears the undo stack.
+  - File > New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`), toolbar New/Open/Save, title shows `name.circ*` for unsaved changes, prompts before New / Open / closing.
+  - New Qt-free [`components/factory.py`](src/circuitsim/components/factory.py) (the "make a default component" function moved out of the canvas so the loader can use it).
+  - **Known limits**: clicking a switch does not mark the file as modified (not on the undo stack); only `.circ` text is saved - live meter readings and simulation time are not.
+  - **119 passing tests** (24 serializer + 4 window tests added in `tests/test_circ_io.py`).
+
 ### What Is Next (Milestone 3)
+- **Step 3B** (10-slot saved parts bar) and **Step 3C** (full properties dialog) remain. Step 3A is done.
 - **Milestone 3**: Versioned `.circ` JSON save/load (`Step 3A`), 10-slot Saved Parts bar with persistence & shortcuts `1`–`9`, `0` (`Step 3B`), and full Properties Dialog with live $V$, $I$, $P$ readouts and inductor $X_L$ & $\tau$ (`Step 3C`).
 
 ### How to Run the App, Preview Tool, and Tests

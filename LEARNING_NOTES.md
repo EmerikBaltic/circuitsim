@@ -1,5 +1,28 @@
 # Learning Notes — CircuitSim
 
+## Milestone 3 — Step 3A: How Saving and Loading Work
+
+### Files to read first
+1. [`src/circuitsim/io/circ_serializer.py`](src/circuitsim/io/circ_serializer.py) — turns a circuit into JSON text and back. No Qt in it, so it is easy to test.
+2. [`src/circuitsim/canvas/scene.py`](src/circuitsim/canvas/scene.py) — `to_document()` and `load_document()`.
+3. [`src/circuitsim/app/main_window.py`](src/circuitsim/app/main_window.py) — the File menu code (`open_path`, `save_to_path`, the unsaved-changes prompt).
+4. [`tests/test_circ_io.py`](tests/test_circ_io.py) — shows every kind of bad file we protect against.
+
+### The ideas in plain language
+- **What is in a `.circ` file?** Just text (JSON) with a list of parts, a list of wires and a few view settings. Every part is stored as its *type* (`"resistor"`), its *name*, where it sits, how it is rotated, and its values. To load it we ask a small factory for a fresh default resistor and then copy the saved values into it.
+- **Why a version number?** Later versions of the program may store more things. `"schema_version": 1` lets an old program say "this file is from a newer CircuitSim" instead of crashing on something it does not understand.
+- **Why validate so strictly?** A file can be damaged (disk problem), cut short, edited by hand, or not a circuit at all. Every value is checked (a resistor of "-5 ohm", a rotation of 45 degrees, two parts with the same name...) and we report a plain sentence such as *"The file is empty."*
+- **All-or-nothing loading.** `load_document()` first builds *all* new items on the side. Only when everything worked does it throw away the old circuit and insert the new items. If anything fails, the old circuit was never touched — that is the same idea as a database *transaction*.
+- **Atomic saving.** If the program wrote straight into your file and the power failed halfway, you would lose both the old and the new version. Instead we (1) write a temporary file next to it, (2) force it onto the disk (`fsync`), (3) copy the old file to `name.circ.bak`, and (4) rename the temporary file over the real one with `os.replace`. Renaming is a single step the operating system finishes completely or not at all.
+- **The `*` in the title.** Qt's `QUndoStack` remembers a "clean" point. After saving we call `setClean()`; any edit moves away from that point (asterisk), and undoing back to it removes the asterisk again.
+
+### Three exercises
+1. Save a circuit, open the `.circ` file in Notepad, change `"resistance": 1000.0` to `4700.0`, and open it in CircuitSim. Which value is shown on the canvas?
+2. In Notepad change `"rotation_deg": 90` to `45` and open the file. Read the message. Then delete the last `}` of the file and try again — how do the two messages differ?
+3. Save a circuit twice with a change in between. Open `yourfile.circ.bak` — which version is in it? Why is this useful?
+
+---
+
 ## Milestone 2 — Step 2C: Live Simulation Session, Background `QThread` Worker, Upright Labels & Canvas Telemetry
 
 In **Step 2C**, we brought the schematic canvas to life! Pressing **Run (`F5`)** solves your schematic continuously in a background worker thread while updating live voltmeter/ammeter readouts, lightbulb glow, switch animations, and problem highlighting on the canvas without ever freezing the GUI.

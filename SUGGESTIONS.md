@@ -18,3 +18,13 @@ Below are improvement ideas identified during **Milestones 1 & 2**. None of thes
    - *Reason*: While the input parser already accepts both `"5.65 G"` and `"5,65 G"`, adding a Preferences option to format *displayed* values on the canvas and in dialogs with either a decimal dot (`4.7 kΩ`) or a decimal comma (`4,7 kΩ`) would make the UI feel native in Croatian and other European locales.
 8. **Startup Self-Check for Stale or Missing Symbol Metadata / SVG Files** *(Effort: Small)*
    - *Reason*: Running a fast check on startup that verifies all 11 built-in IEC symbol `.json` definitions exist, match the expected terminal grid footprints, and log a non-blocking banner if a user-edited `.svg` file has syntax or viewBox mismatches makes custom symbol authoring easier to debug.
+9. **Optional Bulb Burn-Out When Overloaded for Too Long** *(Effort: Small)*
+   - *Reason*: `Lightbulb` already has `burnout_enabled`, `burnout_power_ratio` and `burnout_time` in the engine; exposing them in the properties dialog (off by default) would let students see a bulb fail at e.g. 120% power for 0.5 s.
+10. **Check Spacing Between a Source's Selection Box and the Ground Label (GND2)** *(Effort: Small)*
+    - *Reason*: In testing, the selection box of a voltage source touches the ground label (`GND2`); label placement near the `Ground` symbol needs a quick geometry check like the one done for value labels.
+11. **Recent Files List in the File Menu** *(Effort: Small)*
+    - *Reason*: Reopening the last few `.circ` files with one click is the first thing students will want once they have more than two saved circuits.
+12. **Digit Shortcuts (Step 3B) Must Not Fire While Typing in a Text Field** *(Effort: Small)*
+    - *Reason*: The saved-parts keys `1`-`9`, `0` must be ignored when a text box (value editor, palette search) has keyboard focus, otherwise typing `4.7k` would place parts.
+13. **Mark a Switch Click as an Unsaved Change** *(Effort: Small)*
+    - *Reason*: Clicking a switch on the canvas changes the saved state but is not on the undo stack, so the title asterisk does not appear. Making it an undoable action fixes both.
