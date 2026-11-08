@@ -429,10 +429,10 @@ class ComponentItem(QGraphicsObject):
         )
 
         t = QTransform()
-        if self.rotation_deg:
-            t.rotate(float(self.rotation_deg))
         if self.flipped_h:
             t.scale(-1.0, 1.0)
+        if self.rotation_deg:
+            t.rotate(float(self.rotation_deg))
 
         raw_path = QPainterPath()
         raw_path.setFillRule(Qt.FillRule.WindingFill)
@@ -542,10 +542,10 @@ class ComponentItem(QGraphicsObject):
 
         # 2. Rotated/flipped symbol and selection/problem frame
         painter.save()
-        if self.rotation_deg:
-            painter.rotate(float(self.rotation_deg))
         if self.flipped_h:
             painter.scale(-1.0, 1.0)
+        if self.rotation_deg:
+            painter.rotate(float(self.rotation_deg))
 
         if self.is_ghost:
             pen = QPen(QColor(palette.ghost_tint), 1.5, Qt.PenStyle.DashLine)

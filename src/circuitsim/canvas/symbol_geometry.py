@@ -149,17 +149,15 @@ def transform_terminal_position(
     flipped_h: bool = False,
     grid_px: int = GRID_PITCH_PX,
 ) -> tuple[float, float]:
-    """Compute scene pixel coordinates of a terminal after flip and 90-degree rotation.
+    """Compute scene pixel coordinates of a terminal after rotation and horizontal flip.
 
     Order of local transforms (matching `ComponentItem` transform order):
-        1. Horizontal mirror (`lx = -lx` if `flipped_h` is True).
-        2. Clockwise rotation in screen coordinates (`+90°` maps `(x, y) -> (-y, x)`).
+        1. Clockwise rotation in screen coordinates (`+90°` maps `(x, y) -> (-y, x)`).
+        2. Horizontal mirror (`rx = -rx` if `flipped_h` is True).
         3. Translation by `center_px`.
     """
     lx = local_grid_pos[0] * float(grid_px)
     ly = local_grid_pos[1] * float(grid_px)
-    if flipped_h:
-        lx = -lx
 
     angle_rad = math.radians(rotation_deg % 360)
     cos_a = round(math.cos(angle_rad), 12)
@@ -167,6 +165,9 @@ def transform_terminal_position(
 
     rx = lx * cos_a - ly * sin_a
     ry = lx * sin_a + ly * cos_a
+
+    if flipped_h:
+        rx = -rx
 
     tx = center_px[0] + rx
     ty = center_px[1] + ry

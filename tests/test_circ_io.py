@@ -184,15 +184,15 @@ def test_save_load_rotated_flipped_circuit_preserves_wires_polarity_and_voltages
 
     catalog = load_all_iec_metadata(DEFAULT_IEC_SYMBOLS_DIR)
 
-    # 1. 24 V source at (0, 0), rotated 90° and flipped: pos at (0, 40), neg at (0, -40)
+    # 1. 24 V source at (0, 0), rotated 90° and flipped: pos at (0, -40), neg at (0, 40)
     v1 = PlacedComponentSpec(
         DCVoltageSource("V1", "pos", "neg", voltage=24.0),
         center_px=(0.0, 0.0),
         rotation_deg=90,
         flipped_h=True,
     )
-    # 2. Ground at (0, -20) with terminal at (0, -40)
-    gnd = PlacedComponentSpec(Ground("GND1"), (0.0, -20.0))
+    # 2. Ground at (0, 60) with terminal at (0, 40)
+    gnd = PlacedComponentSpec(Ground("GND1"), (0.0, 60.0))
 
     # 3. Resistor R1 = 1 kΩ, rotated 180°: a at (240, 0), b at (160, 0)
     r1 = PlacedComponentSpec(
@@ -202,7 +202,7 @@ def test_save_load_rotated_flipped_circuit_preserves_wires_polarity_and_voltages
         flipped_h=False,
     )
 
-    # 4. Resistor R2 = 3 kΩ, rotated 270° and flipped: a at (400, -40), b at (400, 40)
+    # 4. Resistor R2 = 3 kΩ, rotated 270° and flipped: a at (400, 40), b at (400, -40)
     r2 = PlacedComponentSpec(
         Resistor("R2", "a", "b", resistance=3000.0),
         center_px=(400.0, 0.0),
@@ -210,20 +210,20 @@ def test_save_load_rotated_flipped_circuit_preserves_wires_polarity_and_voltages
         flipped_h=True,
     )
 
-    # 5. Voltmeter VM1 across R2, rotated 90°: pos at (600, -40), neg at (600, 40)
+    # 5. Voltmeter VM1 across R2, rotated 270°: pos at (600, 40), neg at (600, -40)
     vm1 = PlacedComponentSpec(
         Voltmeter("VM1", "pos", "neg"),
         center_px=(600.0, 0.0),
-        rotation_deg=90,
+        rotation_deg=270,
         flipped_h=False,
     )
 
     # Wires routing between transformed terminals
-    w1 = WireSpec("W1", ((0, 40), (0, 100), (240, 100), (240, 0)))
-    w2 = WireSpec("W2", ((160, 0), (160, -100), (400, -100), (400, -40)))
-    w3 = WireSpec("W3", ((400, -40), (600, -40)))
-    w4 = WireSpec("W4", ((400, 40), (600, 40)))
-    w5 = WireSpec("W5", ((400, 40), (400, 140), (-60, 140), (-60, -40), (0, -40)))
+    w1 = WireSpec("W1", ((0, -40), (0, -100), (240, -100), (240, 0)))
+    w2 = WireSpec("W2", ((160, 0), (160, 100), (400, 100), (400, 40)))
+    w3 = WireSpec("W3", ((400, 40), (600, 40)))
+    w4 = WireSpec("W4", ((400, -40), (600, -40)))
+    w5 = WireSpec("W5", ((400, -40), (400, -80), (700, -80), (700, 140), (0, 140), (0, 40)))
 
     doc_before = CircuitDocument(
         placed=[v1, gnd, r1, r2, vm1],
