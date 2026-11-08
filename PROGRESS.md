@@ -38,7 +38,7 @@
   - File > New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`), toolbar New/Open/Save, title shows `name.circ*` for unsaved changes, prompts before New / Open / closing.
   - New Qt-free [`components/factory.py`](src/circuitsim/components/factory.py) (the "make a default component" function moved out of the canvas so the loader can use it).
   - **Known limits**: clicking a switch does not mark the file as modified (not on the undo stack); only `.circ` text is saved - live meter readings and simulation time are not.
-  - **119 passing tests** (24 serializer + 4 window tests added in `tests/test_circ_io.py`).
+  - **123 passing tests** (24 serializer + 4 window tests added in `tests/test_circ_io.py`).
 
 ### What Is Next (Milestone 3)
 - **Step 3B** (10-slot saved parts bar) and **Step 3C** (full properties dialog) remain. Step 3A is done.
