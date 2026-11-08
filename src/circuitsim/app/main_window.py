@@ -88,7 +88,6 @@ class MainWindow(QMainWindow):
         self._current_path: Path | None = None
 
         self._build_menus_and_toolbars()
-        self._build_saved_parts_bar()
         self._build_docks()
         self._build_status_bar()
         self._connect_signals()
@@ -307,25 +306,6 @@ class MainWindow(QMainWindow):
         main_tb.addSeparator()
         main_tb.addAction(self.act_toggle_theme)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, main_tb)
-
-    def _build_saved_parts_bar(self) -> None:
-        """Create the 10-slot Saved Parts bar at the top (full persistence in Milestone 3)."""
-        self.addToolBarBreak(Qt.ToolBarArea.TopToolBarArea)
-        saved_tb = QToolBar("Saved Parts Bar", self)
-        saved_tb.setMovable(False)
-        saved_tb.addWidget(QLabel(" SAVED PARTS: "))
-        self.saved_slot_buttons: list[QPushButton] = []
-        for slot_idx in range(1, 11):
-            key_label = "0" if slot_idx == 10 else str(slot_idx)
-            btn = QPushButton(f"[{slot_idx}] Empty")
-            btn.setToolTip(
-                f"Saved Part Slot {slot_idx} (Shortcut key '{key_label}')\n"
-                "Full save/load configuration will be activated in Milestone 3."
-            )
-            btn.setMinimumWidth(86)
-            saved_tb.addWidget(btn)
-            self.saved_slot_buttons.append(btn)
-        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, saved_tb)
 
     def _build_docks(self) -> None:
         self.setDockOptions(

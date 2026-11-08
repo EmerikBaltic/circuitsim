@@ -40,9 +40,11 @@
   - **Known limits**: clicking a switch does not mark the file as modified (not on the undo stack); only `.circ` text is saved - live meter readings and simulation time are not.
   - **123 passing tests** (24 serializer + 4 window tests added in `tests/test_circ_io.py`).
 
+- **Milestone 3 — Design Overrides & Refinements**:
+  - **Item 1: Saved Parts Bar Removed (Step 3B Cancelled)**: The 10-slot saved parts toolbar, placeholder buttons, shortcuts and package have been completely removed. Digit keys are no longer reserved for saved parts. (Design decision overrides specification and AGENT_INSTRUCTIONS.md; noted in SUGGESTIONS.md for future redesign if requested).
+
 ### What Is Next (Milestone 3)
-- **Step 3B** (10-slot saved parts bar) and **Step 3C** (full properties dialog) remain. Step 3A is done.
-- **Milestone 3**: Versioned `.circ` JSON save/load (`Step 3A`), 10-slot Saved Parts bar with persistence & shortcuts `1`–`9`, `0` (`Step 3B`), and full Properties Dialog with live $V$, $I$, $P$ readouts and inductor $X_L$ & $\tau$ (`Step 3C`).
+- **Step 3C** (full properties dialog) remains. Step 3A is done, and Step 3B is cancelled by design decision.
 
 ### How to Run the App, Preview Tool, and Tests
 

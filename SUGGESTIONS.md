@@ -24,7 +24,7 @@ Below are improvement ideas identified during **Milestones 1 & 2**. None of thes
     - *Reason*: In testing, the selection box of a voltage source touches the ground label (`GND2`); label placement near the `Ground` symbol needs a quick geometry check like the one done for value labels.
 11. **Recent Files List in the File Menu** *(Effort: Small)*
     - *Reason*: Reopening the last few `.circ` files with one click is the first thing students will want once they have more than two saved circuits.
-12. **Digit Shortcuts (Step 3B) Must Not Fire While Typing in a Text Field** *(Effort: Small)*
-    - *Reason*: The saved-parts keys `1`-`9`, `0` must be ignored when a text box (value editor, palette search) has keyboard focus, otherwise typing `4.7k` would place parts.
+12. **Saved Parts / Favourites** *(Effort: Medium)*
+    - *Note*: saved parts / favourites, redesign later if users ask for it. Digit keys are no longer reserved for it.
 13. **Mark a Switch Click as an Unsaved Change** *(Effort: Small)*
     - *Reason*: Clicking a switch on the canvas changes the saved state but is not on the undo stack, so the title asterisk does not appear. Making it an undoable action fixes both.

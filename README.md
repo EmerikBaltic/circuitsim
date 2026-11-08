@@ -18,7 +18,7 @@ It is designed for electrical engineering students and hobbyists who want both a
   - Grid-snapped ($20\text{ px}$) schematic canvas with right-angle wire routing, Union-Find netlist extraction (`CircuitScene.build_circuit()`), explicit junction dots (`J`), attached wire re-routing on move/rotate/flip, and full `QUndoStack` Undo/Redo (`Ctrl+Z` / `Ctrl+Y`).
   - Background `QThread` simulation worker (`SimulationWorkerController` + pure-Python `SimulationSession`) with live auto-ranged Voltmeter/Ammeter readouts, animated clickable Switch, real-power Lightbulb glow, double-click live value editing (supporting both dot and single-comma decimals like `5,65 G`), and red/amber canvas problem highlighting.
   - **123 automated unit and UI tests** passing (`pytest`), including save/load of `.circ` files (Milestone 3, Step 3A).
-- **Milestone 3 (Save/Load `.circ`, 10-Slot Saved Parts Bar & Full Properties Dialog — Up Next)**
+- **Milestone 3 (Save/Load `.circ` & Full Properties Dialog — In Progress)**
 
 ---
 
@@ -93,7 +93,7 @@ python -m venv .venv
 |-----------|-------|--------|
 | **Milestone 1** | Core MNA DC & Transient Engine, R/L/C, Sources, Switch, Bulb, Meters, Parser, Analytical Tests | **Done** |
 | **Milestone 2** | Dockable Main Window, Component Palette, Interactive IEC Schematic Canvas, Worker Thread, Live Meters/Switch/Bulb | **Done** |
-| **Milestone 3** | Double-Click Live Properties Dialog, Inductor $X_L / \tau$ Calculator, 10-Slot Saved Parts Bar, `.circ` JSON Save/Load | **Next** |
+| **Milestone 3** | Double-Click Live Properties Dialog, Inductor $X_L / \tau$ Calculator, `.circ` JSON Save/Load (Saved Parts bar cancelled) | **In Progress** |
 | **Milestone 4** | 4-Channel Oscilloscope (Probes, Trigger, Cursors, Automatic Measurements, X-Y Mode, Math & FFT, PNG/CSV Export) | Planned |
 | **Milestone 5** | Semiconductors (Diode, Zener, LED, BJT, MOSFET, Op-Amp via Newton-Raphson), Current Animation, Themes, SPICE Import/Export, Packaging | Planned |
 
@@ -118,7 +118,6 @@ CircuitSim/
 │   ├── canvas/         scene, view, wire item, component item
 │   ├── components/     resistor, capacitor, inductor, bulb, switch, meters...
 │   ├── dialogs/        properties dialog, engineering-notation value parser
-│   ├── savedparts/     saved parts bar (10 slots, JSON persistence)
 │   ├── scope/          scope widget, trigger, measurements, FFT
 │   ├── engine/         netlist builder, MNA matrix, integrators, Newton solver
 │   ├── io/             JSON save/load, SPICE import/export, image export
