@@ -339,13 +339,15 @@ class CircuitScene(QGraphicsScene):
             for item in self._placed_items
         }
 
+    TERMINAL_SNAP_RADIUS_PX: float = 10.0  # Snap radius of half a grid cell (10 px)
+
     def find_terminal_near(
         self,
         scene_pos: QPointF | tuple[float, float],
         *,
-        tolerance_px: float = 13.0,
+        tolerance_px: float = 10.0,
     ) -> tuple[ComponentItem, str, PointPx] | None:
-        """Find the closest component terminal within `tolerance_px` of `scene_pos`."""
+        """Find the closest component terminal within `tolerance_px` (default 10 px) of `scene_pos`."""
         sx = scene_pos.x() if isinstance(scene_pos, QPointF) else float(scene_pos[0])
         sy = scene_pos.y() if isinstance(scene_pos, QPointF) else float(scene_pos[1])
         best_dist = tolerance_px
@@ -486,7 +488,19 @@ class CircuitScene(QGraphicsScene):
         points: Sequence[tuple[float, float] | PointPx],
     ) -> WireItem | None:
         """Add an orthogonal wire polyline via `QUndoStack` (ignoring zero-length/duplicate)."""
-        pts = simplify_orthogonal_points(points, snap=True)
+        if len(points) < 2:
+            return None
+
+        # Snap endpoints to nearest terminal if within snap radius (half a grid cell = 10 px)
+        raw_pts = [normalize_point_px(p, snap=False) for p in points]
+        term_start = self.find_terminal_near(raw_pts[0], tolerance_px=self.TERMINAL_SNAP_RADIUS_PX)
+        if term_start is not None:
+            raw_pts[0] = term_start[2]
+        term_end = self.find_terminal_near(raw_pts[-1], tolerance_px=self.TERMINAL_SNAP_RADIUS_PX)
+        if term_end is not None:
+            raw_pts[-1] = term_end[2]
+
+        pts = simplify_orthogonal_points(raw_pts, snap=True)
         if len(pts) < 2:
             return None
 
