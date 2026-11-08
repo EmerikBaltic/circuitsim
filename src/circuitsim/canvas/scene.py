@@ -16,6 +16,7 @@ from circuitsim.canvas.commands import (
     AddComponentCommand,
     AddWireCommand,
     DeleteItemsCommand,
+    EditComponentParametersCommand,
     FlipComponentsCommand,
     MoveComponentsCommand,
     PasteItemsCommand,
@@ -884,6 +885,40 @@ class CircuitScene(QGraphicsScene):
         self.switch_toggled_by_user.emit(item.component.name, new_closed)
         self.selection_info_changed.emit(item if item.isSelected() else None)
         return new_closed
+
+    def edit_component_parameters(
+        self,
+        item: ComponentItem,
+        new_params: dict[str, float | str],
+        *,
+        show_value: bool | None = None,
+    ) -> bool:
+        """Apply parameter changes to `item` via `QUndoStack` (`EditComponentParametersCommand`)."""
+        comp = item.component
+        old_params: dict[str, float] = {}
+        parsed_new: dict[str, float] = {}
+        for k, raw_val in new_params.items():
+            old_params[k] = comp.get_parameter_value(k)
+            parsed_new[k] = comp.set_parameter_value(k, raw_val)
+            # Restore old value before pushing undo command so redo() performs the transition cleanly
+            comp.set_parameter_value(k, old_params[k])
+
+        old_show = comp.show_value
+        new_show = old_show if show_value is None else bool(show_value)
+        if old_params == parsed_new and old_show == new_show:
+            return False
+
+        self.undo_stack.push(
+            EditComponentParametersCommand(
+                self,
+                item,
+                old_params,
+                parsed_new,
+                old_show_value=old_show,
+                new_show_value=new_show,
+            )
+        )
+        return True
 
     def clear_diagnostics(self) -> None:
         """Clear all problem highlighting on components and wires."""

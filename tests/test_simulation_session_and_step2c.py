@@ -399,9 +399,10 @@ win.show()
 app.processEvents()
 assert win.speed_combo.isVisible(), "Speed dropdown must be visible on toolbar without overflowing"
 
-# 3. Verify QuickValueDialog validation, live preview, and readable error message (Addition #1)
+# 3. Verify QuickValueDialog validation, live preview, and readable error message (Addition #1 & Item 2)
 res = Resistor("R1", "a", "b", resistance=1000.0)
 dlg = QuickValueDialog(res)
+assert dlg.live_edit_note_label.text() == "Changes apply immediately while the simulation is running."
 dlg.inputs["resistance"].setText("invalid_xyz")
 assert dlg._apply_current_inputs() is False
 assert dlg.error_label.isHidden() is False

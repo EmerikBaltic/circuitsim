@@ -24,6 +24,7 @@ class ComponentParameter:
     unit: str
     allow_zero: bool = False
     allow_negative: bool = False
+    live_editable: bool = True
 
 
 _DEFAULT_PARAMETERS_BY_TYPE: dict[str, tuple[ComponentParameter, ...]] = {
@@ -38,6 +39,7 @@ _DEFAULT_PARAMETERS_BY_TYPE: dict[str, tuple[ComponentParameter, ...]] = {
             "V",
             allow_zero=True,
             allow_negative=True,
+            live_editable=False,
         ),
         ComponentParameter("esr", "Series ESR", "Ω", allow_zero=True),
     ),

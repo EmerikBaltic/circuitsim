@@ -69,6 +69,15 @@ class QuickValueDialog(QDialog):
         header.setWordWrap(True)
         root_layout.addWidget(header)
 
+        self.live_edit_note_label = QLabel(
+            "Changes apply immediately while the simulation is running."
+        )
+        self.live_edit_note_label.setWordWrap(True)
+        self.live_edit_note_label.setStyleSheet(
+            "color: #58A6FF; font-size: 11px; font-style: italic;"
+        )
+        root_layout.addWidget(self.live_edit_note_label)
+
         form = QFormLayout()
         form.setSpacing(8)
         for spec in self._param_specs:
@@ -166,7 +175,10 @@ class QuickValueDialog(QDialog):
             lbl.setText(f"{spec.label} cannot be negative")
             return
 
-        lbl.setText(f"= {format_engineering_value(val, spec.unit)}")
+        preview_text = f"= {format_engineering_value(val, spec.unit)}"
+        if not spec.live_editable:
+            preview_text += " (applies at t = 0 after Stop + Run)"
+        lbl.setText(preview_text)
 
     def validate_inputs(self) -> tuple[dict[str, float] | None, str | None]:
         """Validate all parameter fields and return `(parsed_dict, error_message)`."""

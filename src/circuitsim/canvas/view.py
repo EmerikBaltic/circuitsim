@@ -127,15 +127,9 @@ class CircuitView(QGraphicsView):
             return False
 
         def _on_apply(parsed_map: dict[str, float], show_val: bool) -> None:
-            for k, v in parsed_map.items():
-                comp.set_parameter_value(k, v)
-            comp.show_value = show_val
-            item.live_display_value = None
-            item.update()
-            self.circuit_scene.component_parameters_edited.emit(
-                comp.name, parsed_map
+            self.circuit_scene.edit_component_parameters(
+                item, parsed_map, show_value=show_val
             )
-            self.circuit_scene.selection_info_changed.emit(item)
 
         dlg = QuickValueDialog(comp, on_apply=_on_apply, parent=self.window())
         dlg.exec()

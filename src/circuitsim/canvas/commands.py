@@ -262,3 +262,52 @@ class PasteItemsCommand(QUndoCommand):
         for jp in self.junctions:
             self.scene._set_explicit_junction(jp, present=False, refresh=False)
         self.scene.refresh_connectivity_visuals()
+
+
+class EditComponentParametersCommand(QUndoCommand):
+    """Undoable command that edits a component's numerical parameters and updates live simulation."""
+
+    def __init__(
+        self,
+        scene: CircuitScene,
+        item: ComponentItem,
+        old_params: dict[str, float],
+        new_params: dict[str, float],
+        *,
+        old_show_value: bool | None = None,
+        new_show_value: bool | None = None,
+    ) -> None:
+        super().__init__(f"Edit {item.component.name} Values")
+        self.scene: CircuitScene = scene
+        self.item: ComponentItem = item
+        self.old_params: dict[str, float] = dict(old_params)
+        self.new_params: dict[str, float] = dict(new_params)
+        self.old_show_value: bool = (
+            item.component.show_value
+            if old_show_value is None
+            else bool(old_show_value)
+        )
+        self.new_show_value: bool = (
+            item.component.show_value
+            if new_show_value is None
+            else bool(new_show_value)
+        )
+
+    def _apply(self, params: dict[str, float], show_val: bool) -> None:
+        comp = self.item.component
+        for k, v in params.items():
+            comp.set_parameter_value(k, v)
+        comp.show_value = show_val
+        self.item.live_display_value = None
+        self.item.update()
+        self.scene.component_parameters_edited.emit(comp.name, dict(params))
+        self.scene.selection_info_changed.emit(
+            self.item if self.item.isSelected() else None
+        )
+
+    def redo(self) -> None:
+        self._apply(self.new_params, self.new_show_value)
+
+    def undo(self) -> None:
+        self._apply(self.old_params, self.old_show_value)
+
