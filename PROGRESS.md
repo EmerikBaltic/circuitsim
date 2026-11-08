@@ -1,6 +1,6 @@
 # Project Progress — CircuitSim
 
-## Current Status: Milestone 2 Complete, Milestone 3 Step 3A (Save/Load) Done
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Lettered Items A-G Done (180 Passing Tests)
 
 ### What Is Done
 - **Environment, Licensing & Editable Package Installation**:
@@ -28,8 +28,6 @@
     - **Run / Pause / Stop Visual States**: Distinct green active Run, amber active Pause (`▶ Resume`), red Error outline, and left-hand status bar indicator (`● Running`, `❚❚ Paused`, `■ Stopped`) across Dark and Light themes.
     - **Unconnected Parts & Ground Hint**: Components with no wires attached are dimmed (`opacity = 0.45`) and ignored with an amber warning (`"B1 is not connected and is ignored"`) so the rest of the circuit runs; connected islands with no path to ground still raise a floating-node error; missing ground reports `"No ground connected — Add a Ground part and wire it to the circuit"`.
     - **Selection Outline**: Component selection and diagnostic boxes stay strictly clear of upright name (`R1`) and value (`1 kΩ`) labels across all rotations (`0°`, `90°`, `180°`, `270°`).
-- **Unit Test Suite (`tests/`)**:
-  - **95 passing tests** (including split analytic meter/switch/live-edit tests `6a`, value edit Undo/Redo while stopped and running `6b`, clean worker `QThread` shutdown on window close `6c`, real canvas item/wire highlight colours `6d`, and a 30-resistor ladder + RC load UI responsiveness benchmark `6e`).
 
 - **Milestone 3 - Step 3A: Save / Load `.circ` Files (done)**:
   - [`src/circuitsim/io/circ_serializer.py`](src/circuitsim/io/circ_serializer.py) (no Qt): versioned JSON (`"format": "circuitsim"`, `"schema_version": 1`) storing components (type, name, label, show_value, position, rotation, flip, parameters, extra settings), wires, junction dots and view state (theme, zoom, pan, simulation speed). Strict validation with plain-language `CircuitFileError` messages (empty, truncated, wrong format, newer version, bad values).
@@ -37,14 +35,40 @@
   - `CircuitScene.load_document` builds everything first and swaps only if it all worked; `CircuitScene.to_document` snapshots the schematic. Loading clears the undo stack.
   - File > New / Open / Save / Save As (`Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`), toolbar New/Open/Save, title shows `name.circ*` for unsaved changes, prompts before New / Open / closing.
   - New Qt-free [`components/factory.py`](src/circuitsim/components/factory.py) (the "make a default component" function moved out of the canvas so the loader can use it).
-  - **Known limits**: clicking a switch does not mark the file as modified (not on the undo stack); only `.circ` text is saved - live meter readings and simulation time are not.
-  - **123 passing tests** (24 serializer + 4 window tests added in `tests/test_circ_io.py`).
 
-- **Milestone 3 — Design Overrides & Refinements**:
+- **Milestone 3 — Design Overrides & Refinements (Items 1–4)**:
   - **Item 1: Saved Parts Bar Removed (Step 3B Cancelled)**: The 10-slot saved parts toolbar, placeholder buttons, shortcuts and package have been completely removed. Digit keys are no longer reserved for saved parts. (Design decision overrides specification and AGENT_INSTRUCTIONS.md; noted in SUGGESTIONS.md for future redesign if requested).
   - **Item 2: No Fake Oscilloscope**: The empty "Oscilloscope (4-Channel)" dock widget and unused placeholder actions/menus have been removed. Window layout restoration (`restoreState`) guarantees stale saved states cannot bring the dock back. The `circuitsim/scope/` package structure remains preserved for Milestone 4.
   - **Item 3: Lowest Free Number for Component Names**: New and pasted components now consistently receive the lowest unused number for their prefix (`R`, `C`, `L`, `V`, `VM`, `A`, `B`, `SW`, `GND`, etc.). Deleting a part frees its number for the next part added; undoing restores original names; names stay unique at all times; save/load round-trips preserve names.
   - **Item 4: Small Visual Fixes**: The internal letter in Voltmeter (`V`) and Ammeter (`A`) symbols stays upright across all rotations (`0°`, `90°`, `180°`, `270°`) and horizontal flip (`F`). Components are placed above wires (`Z = 20.0` vs `5.0`), and value readouts (e.g. `"11.11 mA"`) and name labels include a canvas background plate so wires never cut through or obscure the text.
+
+- **Quality & Reliability Fixes (Items A–E)**:
+  - **Item A (Polarity Regressions & Transform Chain)**: Added 40 pure-Python regression tests in `tests/test_polarity.py` covering all 8 orientations (`rot` in `{0, 90, 180, 270}`, `flip` in `{False, True}`) for DC Voltage Source, DC Current Source, Voltmeter, Ammeter, and Two-source series chain. Unified `SymbolLibrary._paint_procedural_iec` transform order (`scale(-1, 1)` then `rotate(rot)`) with `transform_terminal_position` so drawing and netlist extraction use identical geometry.
+  - **Item B (Hit Areas & Bounding Rectangles)**: Implemented exact `shape()` on `ComponentItem` with `QPainterPath` (using `WindingFill`) matching rotated/flipped symbol body and 6 px terminal clearance. Tightened `boundingRect()`. Excluded label plates from mouse clicks so wires behind labels remain selectable. Bound `prepareGeometryChange()` to `rotation_deg` and `flipped_h` setters. Verified via `tests/test_hitboxes.py`.
+  - **Item C (Wire Re-routing & Detour on Rotate/Move)**: Implemented collision-avoidance routing in `_route_wire_avoiding_body` in `src/circuitsim/canvas/connectivity.py`. Direct routes that intersect the component body are diverted via orthogonal 40 px clear bypass paths (terminal `a` on negative side, `b` on positive side), preventing tangled overlapping shorts. Added 8 regression tests in `tests/test_rotation_and_moving_wires.py` verifying full 360° cycles, dragging, group rotation, voltage preservation, and undo/redo.
+  - **Item D (Wire Terminal Snapping)**: Added `TERMINAL_SNAP_RADIUS_PX = 10.0` (half grid cell) snapping in `add_wire`, hovering terminal indicator, and nearest terminal selection. Tested in `tests/test_wire_snapping.py` across 0, 1, 5, 8, 9 px (connects) and 11 px (stays off).
+  - **Item E (Save / Load Round-Trip Preservation)**: Added `test_save_load_rotated_flipped_circuit_preserves_wires_polarity_and_voltages` in `tests/test_circ_io.py`. Verified that saving and reloading circuits with rotated and flipped parts preserves exact wire connections, terminal polarities, and simulation voltages.
+
+- **Item F (Test Suite Speed Analysis)**:
+  - **Profile (`pytest --durations=10`)**: 180 passed in ~43.5 s. The top 10 slowest tests account for ~23 s (~53% of total time), with the slowest being UI tests in `tests/test_simulation_session_and_step2c.py` (2.7s–3.0s each), `test_hitboxes.py` (1.95s), and `test_circ_io.py` window tests (1.85s).
+  - **Root Cause**: Tests involving Qt widgets are executed in isolated subprocesses (`_run_qt` via `sys.executable -c`) to enforce the strict architectural rule that pure-Python physics, connectivity, and serializer modules have zero Qt imports in `sys.modules`. On Windows, each subprocess invocation incurs Python startup and dynamic loading of large PySide6 DLLs (~1.5–2.5 s per process). By contrast, all 130+ pure-Python unit tests complete in under 2 seconds combined (<0.02 s each).
+  - **Optimization Assessment**: Running Qt tests in-process would reduce test suite duration to <10 s, but would contaminate `sys.modules` and weaken the isolation tests that prove physics and IO code remain Qt-free. The current architecture should be left alone because 43 s is fast enough for CI/local verification while providing absolute architectural guarantees.
+
+- **Item G (Plan Only: Explicit Wires & Junctions Architecture Plan)**:
+  ```text
+  1. Data Model: Pure-Python NetGraph; edges are straight runs WireSegment(id, p1=(x1,y1), p2=(x2,y2)); explicit Junction(id, pos=(x,y)) for node degree >= 3. Multi-bend polylines decompose into segments.
+  2. Qt-Free Logic: Core lives in circuitsim.wiring.net_graph & circuitsim.canvas.connectivity (0 Qt imports); canvas WireItem and JunctionItem are thin view projections reflecting NetGraph updates.
+  3. File Format: Schema v2 stores segment list + explicit junctions; migrate_v1_to_v2() splits legacy v1 polylines, resolves T-intersections, deduplicates collinear runs, and upgrades seamlessly in-memory.
+  4. Tests: Existing netlist extraction tests verify identical MNA matrices; wire drawing/moving tests adapt from polyline arrays to segment collections while preserving all coverage.
+  5. Stepped Commits:
+     - Commit 1 (~120 LOC): NetGraph and WireSegment pure-Python data structures with graph topology unit tests.
+     - Commit 2 (~140 LOC): Schema v2 serializer, v1->v2 migration, and .circ save/load round-trip tests.
+     - Commit 3 (~160 LOC): Update connectivity.py Union-Find and wire splitting to operate on NetGraph segments.
+     - Commit 4 (~150 LOC): Connect canvas WireItem/JunctionItem and interactive routing tools to NetGraph.
+  6. Risks & Mitigation:
+     - Risk 1: Collinear overlapping segments creating micro-loops. Mitigate with 1D interval merging on orthogonal lines before graph insertion.
+     - Risk 2: Dragging/rotating parts causing non-orthogonal angles. Mitigate by re-running orthogonal detour routing on move.
+  ```
 
 ### What Is Next (Milestone 3)
 - **Step 3C** (full properties dialog) remains. Step 3A is done, and Step 3B is cancelled by design decision.
@@ -61,6 +85,6 @@
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (95 tests)
+# Run the full test suite (180 tests)
 .\.venv\Scripts\pytest.exe
 ```
