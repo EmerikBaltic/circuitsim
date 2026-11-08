@@ -403,14 +403,14 @@ class MNASolver:
             elif isinstance(comp, (DCVoltageSource, ACVoltageSource)):
                 row_k = self._vs_to_idx[comp.name]
                 rhs_b[row_k] = comp.voltage_at(sim_time)
-            elif isinstance(comp, Switch) and comp.c_parasitic > 0.0:
-                _, i_cap_eq = comp.companion_model(dt, method_str)
+            elif isinstance(comp, Switch) and (comp.c_parasitic > 0.0 or comp.arcing):
+                _, i_sw_eq = comp.companion_model(dt, method_str)
                 idx_a = self._node_to_idx.get(comp.nodes[0])
                 idx_b = self._node_to_idx.get(comp.nodes[1])
                 if idx_a is not None:
-                    rhs_b[idx_a] += i_cap_eq
+                    rhs_b[idx_a] += i_sw_eq
                 if idx_b is not None:
-                    rhs_b[idx_b] -= i_cap_eq
+                    rhs_b[idx_b] -= i_sw_eq
             elif isinstance(comp, Capacitor):
                 # i_ab(t_n) = G_eq * v_ab(t_n) - I_eq
                 # KCL at node_a: +G_eq * v_ab - I_eq => move +I_eq to RHS at node_a
@@ -752,6 +752,38 @@ class MNASolver:
         for node, idx in self._node_to_idx.items():
             node_voltages[node] = float(solution_x[idx])
 
+        # 3b. Check for switch contact breakdown arc ignition or extinction.
+        #     Treat arc start/stop like a switch event: refactorize and settle with
+        #     Backward Euler on this step and the following two steps.
+        arc_state_changed = False
+        arc_ignited_switches: list[str] = []
+        for comp in self.circuit.components:
+            if isinstance(comp, Switch) and not comp.closed:
+                v_sw = node_voltages.get(comp.nodes[0], 0.0) - node_voltages.get(
+                    comp.nodes[1], 0.0
+                )
+                if not comp.arcing and comp.check_arc_ignition(v_sw):
+                    arc_state_changed = True
+                    arc_ignited_switches.append(comp.name)
+                elif comp.arcing and comp.check_arc_extinction(v_sw):
+                    arc_state_changed = True
+
+        if arc_state_changed:
+            if use_be_on_switch:
+                active_method = IntegrationMethod.BACKWARD_EULER
+                method_str = active_method.value
+                self._be_steps_remaining = max(self._be_steps_remaining, 2)
+            self._assemble_and_factorize(
+                mode="transient", dt=dt, method_str=method_str
+            )
+            needs_rebuild = True
+            assert self._lu_piv is not None
+            if dim > 0:
+                rhs_b = self._build_rhs_transient(t_next, dt, method_str)
+                solution_x = lu_solve(self._lu_piv, rhs_b, check_finite=True)
+                for node, idx in self._node_to_idx.items():
+                    node_voltages[node] = float(solution_x[idx])
+
         # 4. Update component voltages, currents, companion states, and meter buffers.
         step_warnings: list[CircuitWarning] = list(self._topology_warnings)
         branch_currents: dict[str, float] = {}
@@ -804,8 +836,10 @@ class MNASolver:
                 g_eq, i_hist = comp.companion_model(dt, method_str)
                 i_ab = g_eq * v_ab + i_hist
                 comp.update_companion_state(v_ab, i_ab)
-                if abs(comp.ind_voltage) >= kickback_threshold or (
-                    switch_opened and abs(comp.ind_voltage) > 2.0 * max_source_v
+                if (
+                    abs(comp.ind_voltage) >= kickback_threshold
+                    or (switch_opened and abs(comp.ind_voltage) > 2.0 * max_source_v)
+                    or bool(arc_ignited_switches)
                 ):
                     step_warnings.append(
                         CircuitWarning(

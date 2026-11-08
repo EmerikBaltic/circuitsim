@@ -1,33 +1,71 @@
 # CircuitSim — Desktop Electrical Circuit Simulator
 
-An educational desktop electrical circuit simulator built with **Python 3.11+**, **NumPy / SciPy** (Modified Nodal Analysis solver), and **PySide6 (Qt 6 Widgets)**.
+**CircuitSim** is an open-source, educational desktop electrical circuit simulator built with **Python 3.11+**, **NumPy / SciPy** (Modified Nodal Analysis physics engine), and **PySide6 (Qt 6 Widgets)**.
 
-## Quick Start
+It is designed for electrical engineering students and hobbyists who want both an interactive schematic capture + virtual instrument bench and a clean, readable Python codebase that demonstrates how real circuit simulators (like SPICE) work under the hood.
 
-### 1. Create the Virtual Environment and Install in Editable Mode
+---
+
+## Current Project Status
+
+- **Milestone 1 (Simulation Engine — Complete)**:
+  - Pure-Python/NumPy/SciPy **Modified Nodal Analysis (MNA)** solver with cached LU factorization (`scipy.linalg.lu_factor` / `lu_solve`), strictly decoupled from Qt.
+  - **DC Operating Point** and **Transient Analysis** using **Trapezoidal integration** (second-order accurate, lossless on undamped $LC$ tanks) with automatic **Backward Euler** startup and switch-event damping to eliminate numerical ringing.
+  - **Components**: Resistor, Capacitor (with initial voltage & ESR), Inductor (with winding resistance DCR, reactance $X_L = 2\pi f L$, and automatic Thévenin time constant $\tau = L / (R_{\text{th}} + \text{DCR})$), DC Voltage & Current Sources, AC Voltage Source (sine, square, triangle, sawtooth, pulse, DC offset), SPST Switch ($1\text{ m}\Omega$ ON, $1\text{ G}\Omega$ OFF, timed switching, $10\text{ pF}$ contact capacitance, and $350\text{ V}$ contact breakdown arc model), Incandescent Lightbulb ($R_{\text{hot}} = V^2/P$ and optional thermal filament inrush model), and polarity-aware Voltmeter ($10\text{ M}\Omega$) & Ammeter ($1\text{ m}\Omega$) with DC, AC RMS, Peak, and Instantaneous modes.
+  - **Topological Diagnostics**: Plain-language detection of missing ground, floating/dangling nodes, ideal voltage-source loops, ammeters connected in parallel across voltage sources, and inductive kickback warnings.
+  - **56 analytical unit tests** passing (`pytest`).
+- **Milestone 2 (Main Window & Interactive Schematic Canvas — Up Next)**
+
+---
+
+## Quick Start & Installation
+
+### 1. Clone the Repository and Create a Virtual Environment
 
 ```powershell
+git clone https://github.com/<your-username>/circuitsim.git
+cd circuitsim
 python -m venv .venv
+```
+
+### 2. Install Dependencies and `circuitsim` in Editable Mode
+
+```powershell
 .\.venv\Scripts\pip.exe install -r requirements.txt
 .\.venv\Scripts\pip.exe install -e .
 ```
 
-### 2. Run the Unit Tests
+### 3. Run the Unit Test Suite
 
 ```powershell
 .\.venv\Scripts\pytest.exe
 ```
 
-### 3. Run the Application
+### 4. Run the Application / Engine Demo
 
 ```powershell
 .\.venv\Scripts\python.exe -m circuitsim.main
 ```
 
+---
+
+## Development Roadmap
+
+| Milestone | Scope | Status |
+|-----------|-------|--------|
+| **Milestone 1** | Core MNA DC & Transient Engine, R/L/C, Sources, Switch, Bulb, Meters, Parser, Analytical Tests | **Done** |
+| **Milestone 2** | Dockable Main Window, Component Palette, Interactive IEC Schematic Canvas, Worker Thread, Live Meters/Switch/Bulb | **Next** |
+| **Milestone 3** | Double-Click Live Properties Dialog, Inductor $X_L / \tau$ Calculator, 10-Slot Saved Parts Bar, `.circ` JSON Save/Load | Planned |
+| **Milestone 4** | 4-Channel Oscilloscope (Probes, Trigger, Cursors, Automatic Measurements, X-Y Mode, Math & FFT, PNG/CSV Export) | Planned |
+| **Milestone 5** | Semiconductors (Diode, Zener, LED, BJT, MOSFET, Op-Amp via Newton-Raphson), Current Animation, Themes, SPICE Import/Export, Packaging | Planned |
+
+---
+
 ## Project Structure
 
 ```text
 CircuitSim/
+├── LICENSE
 ├── README.md
 ├── PROGRESS.md
 ├── LEARNING_NOTES.md
@@ -46,11 +84,14 @@ CircuitSim/
 │   ├── scope/          scope widget, trigger, measurements, FFT
 │   ├── engine/         netlist builder, MNA matrix, integrators, Newton solver
 │   ├── io/             JSON save/load, SPICE import/export, image export
-│   └── resources/      icons, themes (QSS), example circuits
-└── tests/              solver tests, parser tests, saved-parts tests
+│   └── resources/      icons, themes (QSS), example circuits, symbols/iec/
+└── tests/              solver tests, parser tests, transient & reactive tests
 ```
+
+---
 
 ## Licensing & Third-Party Libraries
 
+- **CircuitSim** is released under the [MIT License](LICENSE).
 - **PySide6 (Qt for Python)** is licensed under the **LGPLv3**.
 - **NumPy** and **SciPy** are licensed under the **BSD 3-Clause License**.

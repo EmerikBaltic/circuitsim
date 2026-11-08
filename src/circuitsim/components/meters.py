@@ -58,10 +58,17 @@ class _BaseMeter(Component):
         return 1.0 / self.r_internal
 
     def record_sample(self, sim_time: float, value: float, dt: float = 0.0) -> None:
-        """Append a time-domain reading to the meter's sliding window."""
+        """Append a time-domain reading to the meter's sliding window.
+
+        Each sample at `sim_time` with step size `dt` covers the interval
+        `(sim_time - dt, sim_time]`. Evicting samples with timestamp
+        `<= sim_time - window_duration` ensures that a window of duration
+        `K * T` contains exactly `K * T / dt` intervals (and does not double-count
+        both endpoints of a periodic waveform).
+        """
         self._samples.append((sim_time, value, max(dt, 0.0)))
-        cutoff = sim_time - self.window_duration - 1e-12
-        while len(self._samples) > 1 and self._samples[0][0] < cutoff:
+        cutoff = sim_time - self.window_duration + 1e-12
+        while len(self._samples) > 1 and self._samples[0][0] <= cutoff:
             self._samples.popleft()
 
     def _instantaneous_value(self) -> float:

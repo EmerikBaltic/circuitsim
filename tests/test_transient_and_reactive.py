@@ -145,8 +145,9 @@ def test_inductive_reactance_against_ac_rms_meters() -> None:
     z_inductor = math.hypot(dcr, expected_xl)
     expected_i_rms = expected_v_rms / math.hypot(dcr + ammeter.r_internal, expected_xl)
 
-    assert math.isclose(voltmeter.reading, expected_v_rms, rel_tol=2e-3)
-    assert math.isclose(ammeter.reading, expected_i_rms, rel_tol=2e-3)
+    assert math.isclose(voltmeter.reading, expected_v_rms, rel_tol=1e-4)
+    assert voltmeter.format_reading() == "7.071 V"
+    assert math.isclose(ammeter.reading, expected_i_rms, rel_tol=1e-3)
 
     # Measured impedance magnitude V_rms / I_rms from the meters matches sqrt(dcr^2 + X_L^2):
     measured_z = voltmeter.reading / ammeter.reading
@@ -342,10 +343,71 @@ def test_switch_event_numerical_ringing_without_be_and_fix_with_be() -> None:
     assert float(np.max(np.abs(post_switch_with_be))) < 1e-6
 
 
-def test_inductive_kickback_with_10pf_contact_capacitance_and_warning() -> None:
-    """Verify inductive kickback warning and LC_parasitic peak when interrupting an inductor."""
-    # 12 V source driving a 10 mH inductor (with 12 Ohm DCR -> 1.0 A steady-state current)
-    # through a closed switch with 10 pF parasitic contact capacitance.
+def test_inductive_kickback_clamped_by_contact_breakdown_arc() -> None:
+    """Verify default 350 V switch breakdown clamps kickback, dissipates ~1/2*L*I0^2, and extinguishes."""
+    # Inductor L = 10 mH carrying initial current I0 = 1.0 A (stored magnetic energy = 50 mJ)
+    # in a loop with a closed switch that opens at t = 1 us.
+    ind_l = 10e-3
+    i0 = 1.0
+    v_bd = 350.0
+    expected_stored_energy = 0.5 * ind_l * (i0**2)  # 0.050 J (50 mJ)
+
+    circuit = Circuit()
+    sw = Switch(
+        "SW1",
+        "0",
+        "ind_top",
+        closed=True,
+        r_on=1e-3,
+        r_off=1e9,
+        c_parasitic=10e-12,
+        v_breakdown=v_bd,
+        r_arc=1.0,
+        i_hold=1e-3,
+        toggle_time=1e-6,
+    )
+    ind = Inductor(
+        "L1",
+        "ind_top",
+        "0",
+        inductance=ind_l,
+        dcr=0.0,
+        initial_current=i0,
+    )
+    circuit.add(sw)
+    circuit.add(ind)
+    circuit.add(Ground("GND", "0"))
+
+    solver = MNASolver(circuit)
+    # Arc discharge time is roughly L * I0 / V_bd = 10 mH * 1 A / 350 V = 28.57 us.
+    # Run for 50 us with dt = 0.1 us so the arc ignites, discharges L1, and extinguishes.
+    dt = 0.1e-6
+    res = solver.solve_transient(duration=50e-6, dt=dt)
+
+    # 1. Warning must fire:
+    kickback_warnings = [w for w in res.warnings if w.code == "inductive_kickback"]
+    assert len(kickback_warnings) == 1
+    assert "Inductive kickback, consider a flyback diode" in kickback_warnings[0].message
+
+    # 2. Peak voltage across the switch / inductor is clamped near v_breakdown (350 V + I0 * r_arc = 351 V):
+    v_sw = res.component_voltages["SW1"]
+    i_sw = res.branch_currents["SW1"]
+    peak_v_sw = float(np.max(np.abs(v_sw)))
+    assert v_bd <= peak_v_sw <= v_bd + i0 * sw.r_arc + 2.0
+
+    # 3. Total energy dissipated in the switch arc is close to 1/2 * L * I0^2 (50 mJ):
+    dissipated_energy = float(np.sum(v_sw[1:] * i_sw[1:]) * dt)
+    assert math.isclose(dissipated_energy, expected_stored_energy, rel_tol=0.03)
+
+    # 4. Arc extinguishes once the inductor current falls near zero, leaving only
+    #    the tiny sub-breakdown LC_parasitic ring-down (I_ring = V_bd / sqrt(L / C_p) = 11.07 mA):
+    assert sw.arcing is False
+    max_lc_ringdown_current = v_bd / math.sqrt(ind_l / sw.c_parasitic) + sw.i_hold
+    assert abs(float(res.branch_currents["L1"][-1])) <= max_lc_ringdown_current
+
+
+def test_inductive_kickback_unclamped_when_v_breakdown_disabled() -> None:
+    """Verify disabling v_breakdown=None (ideal contact) allows full LC_parasitic spike."""
     circuit = Circuit()
     circuit.add(DCVoltageSource("V1", "src", "0", voltage=12.0))
     sw = Switch(
@@ -356,6 +418,7 @@ def test_inductive_kickback_with_10pf_contact_capacitance_and_warning() -> None:
         r_on=1e-3,
         r_off=1e9,
         c_parasitic=10e-12,
+        v_breakdown=None,  # Ideal contact (breakdown disabled)
         toggle_time=1e-6,
     )
     ind = Inductor(
@@ -371,16 +434,12 @@ def test_inductive_kickback_with_10pf_contact_capacitance_and_warning() -> None:
     circuit.add(Ground("GND", "0"))
 
     solver = MNASolver(circuit)
-    # Step with dt = 50 ns across the switch opening at t = 1 us
     res = solver.solve_transient(duration=3e-6, dt=50e-9)
 
     kickback_warnings = [w for w in res.warnings if w.code == "inductive_kickback"]
     assert len(kickback_warnings) == 1
-    assert "Inductive kickback, consider a flyback diode" in kickback_warnings[0].message
-
-    # Peak kickback voltage across the inductor reaches kilovolts when 1 A is interrupted into 10 pF
     peak_v_ind = float(np.max(np.abs(res.component_voltages["L1"])))
-    assert peak_v_ind > 1000.0
+    assert peak_v_ind > 10000.0
 
 
 def test_ac_voltage_source_waveforms() -> None:
