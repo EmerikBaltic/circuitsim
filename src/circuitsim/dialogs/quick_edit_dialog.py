@@ -1,0 +1,183 @@
+"""Double-click Quick Value Editing Dialog built from `ComponentParameter` metadata."""
+
+from __future__ import annotations
+
+from typing import Callable
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from circuitsim.components.base import Component, ComponentParameter
+from circuitsim.components.switch import Switch
+from circuitsim.dialogs.value_parser import parse_engineering_value
+
+
+class QuickValueDialog(QDialog):
+    """Compact parameter editor opened when double-clicking a schematic component.
+
+    Features:
+        - Dynamically builds input rows from `component.get_editable_parameters()`
+          so Milestone 3 can extend it into the full multi-tab properties dialog.
+        - Validates all inputs using `parse_engineering_value` (case-sensitive
+          engineering notation: `m` = milli, `M`/`meg` = mega, `u`/`µ` = micro).
+        - Displays a readable inline error message when an entry is invalid
+          without closing or crashing.
+        - Supports live application (`Apply` or `OK`) while the simulation runs.
+    """
+
+    def __init__(
+        self,
+        component: Component,
+        *,
+        on_apply: Callable[[dict[str, float], bool], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.component: Component = component
+        self._on_apply = on_apply
+        self._param_specs: tuple[ComponentParameter, ...] = (
+            component.get_editable_parameters()
+        )
+        self.inputs: dict[str, QLineEdit] = {}
+        self.applied_values: dict[str, float] = {}
+
+        self.setWindowTitle(f"Edit {component.name} ({component.component_type})")
+        self.setMinimumWidth(360)
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(14, 14, 14, 14)
+        root_layout.setSpacing(10)
+
+        header = QLabel(
+            f"<b>{component.name}</b> — Enter values using engineering prefixes "
+            "(`p`, `n`, `u`, `m`, `k`, `M`/`meg`, `G`):"
+        )
+        header.setWordWrap(True)
+        root_layout.addWidget(header)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        for spec in self._param_specs:
+            row_widget = QWidget(self)
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+
+            line_edit = QLineEdit(component.format_parameter_value(spec.key))
+            line_edit.setPlaceholderText(f"e.g. 4.7k, 100n ({spec.unit})")
+            line_edit.textChanged.connect(self._clear_error)
+            self.inputs[spec.key] = line_edit
+            row_layout.addWidget(line_edit, stretch=1)
+
+            unit_lbl = QLabel(spec.unit)
+            unit_lbl.setMinimumWidth(24)
+            row_layout.addWidget(unit_lbl)
+
+            form.addRow(f"{spec.label}:", row_widget)
+
+        self.switch_closed_cb: QCheckBox | None = None
+        if isinstance(component, Switch):
+            self.switch_closed_cb = QCheckBox("Switch Closed (ON)")
+            self.switch_closed_cb.setChecked(component.closed)
+            form.addRow("State:", self.switch_closed_cb)
+
+        self.show_value_cb = QCheckBox("Show value on schematic canvas")
+        self.show_value_cb.setChecked(component.show_value)
+        form.addRow("Display:", self.show_value_cb)
+
+        root_layout.addLayout(form)
+
+        # Readable error banner (hidden until an invalid input is entered)
+        self.error_label = QLabel("")
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet(
+            "color: #FF6B6B; font-weight: 600; padding: 4px;"
+        )
+        self.error_label.setVisible(False)
+        root_layout.addWidget(self.error_label)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Apply
+            | QDialogButtonBox.StandardButton.Cancel,
+            Qt.Orientation.Horizontal,
+            self,
+        )
+        btn_box.accepted.connect(self._on_ok_clicked)
+        btn_box.rejected.connect(self.reject)
+        apply_btn = btn_box.button(QDialogButtonBox.StandardButton.Apply)
+        if apply_btn is not None:
+            apply_btn.clicked.connect(self._on_apply_clicked)
+        root_layout.addWidget(btn_box)
+
+    def _clear_error(self) -> None:
+        if self.error_label.isVisible():
+            self.error_label.clear()
+            self.error_label.setVisible(False)
+
+    def validate_inputs(self) -> tuple[dict[str, float] | None, str | None]:
+        """Validate all parameter fields and return `(parsed_dict, error_message)`."""
+        parsed_map: dict[str, float] = {}
+        for spec in self._param_specs:
+            raw_text = self.inputs[spec.key].text().strip()
+            try:
+                val = parse_engineering_value(raw_text)
+            except ValueError as exc:
+                return None, f"Invalid {spec.label} ({raw_text!r}): {exc}"
+
+            if not spec.allow_negative and not spec.allow_zero and val <= 0.0:
+                return (
+                    None,
+                    f"{spec.label} must be greater than 0 {spec.unit} (got {raw_text!r}).",
+                )
+            if not spec.allow_negative and spec.allow_zero and val < 0.0:
+                return (
+                    None,
+                    f"{spec.label} cannot be negative (got {raw_text!r}).",
+                )
+            parsed_map[spec.key] = val
+
+        return parsed_map, None
+
+    def _apply_current_inputs(self) -> bool:
+        parsed_map, err_msg = self.validate_inputs()
+        if err_msg is not None or parsed_map is None:
+            self.error_label.setText(err_msg or "Invalid input.")
+            self.error_label.setVisible(True)
+            return False
+
+        self._clear_error()
+        self.applied_values = dict(parsed_map)
+        show_val = self.show_value_cb.isChecked()
+
+        if self._on_apply is not None:
+            self._on_apply(parsed_map, show_val)
+        else:
+            for k, v in parsed_map.items():
+                self.component.set_parameter_value(k, v)
+            self.component.show_value = show_val
+
+        if (
+            self.switch_closed_cb is not None
+            and isinstance(self.component, Switch)
+        ):
+            self.component.set_closed(self.switch_closed_cb.isChecked())
+
+        return True
+
+    def _on_apply_clicked(self) -> None:
+        self._apply_current_inputs()
+
+    def _on_ok_clicked(self) -> None:
+        if self._apply_current_inputs():
+            self.accept()

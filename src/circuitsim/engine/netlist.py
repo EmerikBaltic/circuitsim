@@ -293,6 +293,7 @@ class Circuit:
 
         # 3. Check for ideal voltage-source loops using Union-Find.
         vs_dsu = _DisjointSet()
+        seen_ideal_vs: list[tuple[str, str, str]] = []
         for comp in non_ground_comps:
             is_ideal_vs = isinstance(comp, (DCVoltageSource, ACVoltageSource)) and (
                 comp.r_internal == 0.0
@@ -301,10 +302,17 @@ class Circuit:
                 c_a = canonical(comp.nodes[0])
                 c_b = canonical(comp.nodes[1])
                 if not vs_dsu.union(c_a, c_b):
+                    loop_root = vs_dsu.find(c_a)
+                    loop_sources = [
+                        name
+                        for name, na, nb in seen_ideal_vs
+                        if vs_dsu.find(na) == loop_root
+                    ] + [comp.name]
                     raise VoltageSourceLoopError(
-                        sources=(comp.name,),
+                        sources=tuple(loop_sources),
                         message="Voltage sources in a loop",
                     )
+                seen_ideal_vs.append((comp.name, c_a, c_b))
 
         # 4. Check for ammeters connected directly across a rigid voltage difference.
         battery_dsu = _DisjointSet()

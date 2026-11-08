@@ -401,25 +401,30 @@ def extract_connectivity(
             if i < j and wires_overlap_collinear(pts_a, pts_b):
                 uf.union(key_a, key_b)
 
-    # 5. Explicit junction dots (Rule 1)
+    # 5. Explicit junction dots (Rule 1 & Addition #4: a junction dot not on any wire
+    #    must never create a net, a phantom connection, or a false warning)
     norm_junctions: set[PointPx] = {
         normalize_point_px(jp, snap=True) for jp in explicit_junctions
     }
     active_explicit_junctions: set[PointPx] = set()
 
     for jp in norm_junctions:
-        touched_keys: list[object] = []
+        wires_at_jp = [
+            ("wire", wid)
+            for wid, pts in canonical_wires
+            if point_on_wire(jp, pts)
+        ]
+        if not wires_at_jp:
+            # Junction dot is not on any wire: ignore completely
+            continue
+        touched_keys: list[object] = list(wires_at_jp)
         for cname, tname in terminals_at_point.get(jp, ()):
             touched_keys.append(("term", cname, tname))
-        for wid, pts in canonical_wires:
-            if point_on_wire(jp, pts):
-                touched_keys.append(("wire", wid))
-        if touched_keys:
-            j_key = ("junc", jp)
-            uf.add(j_key)
-            for tk in touched_keys:
-                uf.union(j_key, tk)
-            active_explicit_junctions.add(jp)
+        j_key = ("junc", jp)
+        uf.add(j_key)
+        for tk in touched_keys:
+            uf.union(j_key, tk)
+        active_explicit_junctions.add(jp)
 
     # 6. Group connected elements by Union-Find root and assign node names
     groups: dict[object, list[object]] = {}

@@ -102,14 +102,14 @@ def build_stylesheet(palette: ThemePalette) -> str:
     QToolBar {{
         background-color: {palette.panel_bg};
         border-bottom: 1px solid {palette.border_color};
-        spacing: 6px;
-        padding: 4px;
+        spacing: 3px;
+        padding: 2px 4px;
     }}
     QToolButton {{
         background-color: transparent;
         border: 1px solid transparent;
         border-radius: 4px;
-        padding: 4px 8px;
+        padding: 3px 6px;
     }}
     QToolButton:hover {{
         border: 1px solid {palette.selection_accent};

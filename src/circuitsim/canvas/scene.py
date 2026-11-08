@@ -44,7 +44,12 @@ from circuitsim.canvas.symbol_geometry import GRID_PITCH_PX, snap_to_grid
 from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.wire_item import WireItem
 from circuitsim.components.base import Component
+from circuitsim.components.switch import Switch
 from circuitsim.engine.netlist import Circuit
+from circuitsim.engine.simulation_session import (
+    SimulationFrame,
+    SimulationState,
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +73,8 @@ class CircuitScene(QGraphicsScene):
     component_placed = Signal(object)  # Emits placed ComponentItem
     selection_info_changed = Signal(object)  # Emits selected ComponentItem or None
     circuit_modified = Signal()  # Emits whenever components, wires, or junctions change
+    switch_toggled_by_user = Signal(str, bool)  # (switch_name, closed)
+    component_parameters_edited = Signal(str, object)  # (comp_name, dict[str, float])
 
     def __init__(
         self,
@@ -868,6 +875,67 @@ class CircuitScene(QGraphicsScene):
         """Build and return a solver-ready `Circuit` from the schematic's components and wires."""
         return self.extract_connectivity_result().circuit
 
+    def toggle_switch_item(self, item: ComponentItem) -> bool:
+        """Toggle a `Switch` `ComponentItem` with lever animation and notify listeners."""
+        if not isinstance(item.component, Switch):
+            return False
+        new_closed = not item.component.closed
+        item.animate_switch_state(new_closed)
+        self.switch_toggled_by_user.emit(item.component.name, new_closed)
+        self.selection_info_changed.emit(item if item.isSelected() else None)
+        return new_closed
+
+    def clear_diagnostics(self) -> None:
+        """Clear all problem highlighting on components and wires."""
+        for item in self._placed_items:
+            item.set_diagnostic(None, "")
+        for wire in self._wire_items:
+            wire.set_diagnostic(None, "")
+
+    def apply_simulation_frame(self, frame: SimulationFrame) -> None:
+        """Apply telemetry and problem diagnostics from a `SimulationFrame` to canvas items."""
+        if frame.state in (SimulationState.STOPPED, SimulationState.ERROR):
+            for item in self._placed_items:
+                item.reset_live_telemetry()
+        else:
+            for item in self._placed_items:
+                telem = frame.components.get(item.component.name)
+                if telem is not None:
+                    item.apply_telemetry(telem)
+
+        # Map diagnostics to components and wires (error takes precedence over warning)
+        comp_diag: dict[str, tuple[str, str]] = {}
+        wire_diag: dict[str, tuple[str, str]] = {}
+        for diag in frame.diagnostics:
+            for cname in diag.component_names:
+                prev = comp_diag.get(cname)
+                if prev is None or prev[0] != "error":
+                    comp_diag[cname] = (diag.severity, diag.message)
+            for wid in diag.wire_ids:
+                prev_w = wire_diag.get(wid)
+                if prev_w is None or prev_w[0] != "error":
+                    wire_diag[wid] = (diag.severity, diag.message)
+
+        for item in self._placed_items:
+            d = comp_diag.get(item.component.name)
+            if d is not None:
+                item.set_diagnostic(d[0], d[1])
+            else:
+                item.set_diagnostic(None, "")
+
+        for wire in self._wire_items:
+            dw = wire_diag.get(wire.wire_id)
+            if dw is not None:
+                wire.set_diagnostic(dw[0], dw[1])
+            else:
+                wire.set_diagnostic(None, "")
+
+        selected = [
+            it for it in self.selectedItems() if isinstance(it, ComponentItem)
+        ]
+        if selected:
+            self.selection_info_changed.emit(selected[0])
+
     def clear_schematic(self) -> None:
         """Remove all placed components, wires, junctions, and clear the undo stack."""
         self.hide_ghost_preview()
@@ -950,16 +1018,12 @@ class CircuitScene(QGraphicsScene):
         palette = get_theme_palette(self.theme)
         painter.save()
 
-        # 1. Draw all active junction dots (T-junctions + explicit junctions)
+        # 1. Draw all active junction dots (T-junctions + explicit junctions on wires)
         junc_color = QColor(palette.symbol_stroke)
         painter.setPen(QPen(junc_color, 1.2))
         painter.setBrush(QBrush(junc_color))
         for jx, jy in self._active_junction_dots:
             painter.drawEllipse(QPointF(float(jx), float(jy)), 4.2, 4.2)
-
-        # Also draw a subtle ring for explicit junctions placed on empty canvas/single wire
-        for ejx, ejy in self._explicit_junctions - self._active_junction_dots:
-            painter.drawEllipse(QPointF(float(ejx), float(ejy)), 4.0, 4.0)
 
         # 2. Draw glowing highlight ring around hovered terminal or wire snap target
         if self._hovered_terminal_pt is not None:

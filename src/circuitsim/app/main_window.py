@@ -1,9 +1,9 @@
-"""Main application window implementing the dockable layout from Section 2."""
+"""Main application window implementing the dockable layout, live simulation worker, and diagnostics."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from circuitsim.app.palette_dock import ComponentPaletteWidget
+from circuitsim.app.sim_worker import SimulationWorkerController
 from circuitsim.app.themes import ThemeMode, build_stylesheet, get_theme_palette
 from circuitsim.canvas.component_item import (
     ComponentItem,
@@ -25,11 +26,20 @@ from circuitsim.canvas.component_item import (
 from circuitsim.canvas.scene import CircuitScene
 from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.view import CircuitView
+from circuitsim.components.lightbulb import Lightbulb
+from circuitsim.dialogs.value_parser import format_engineering_value
+from circuitsim.engine.simulation_session import (
+    SimulationFrame,
+    SimulationSpeed,
+    SimulationState,
+)
 
 DEFAULT_SHORTCUTS_HELP_TEXT: str = (
     "No component selected.\n\n"
     "KEYBOARD & MOUSE SHORTCUTS:\n"
     "• Place part: Drag from Palette (or double-click)\n"
+    "• Edit values live: Double-click any component\n"
+    "• Toggle switch: Click switch on canvas\n"
     "• Draw wire: Drag from any terminal (or press W)\n"
     "• Cancel wire / Deselect: Esc (or Right-click)\n"
     "• Toggle junction dot: J (at cursor) or Right-click\n"
@@ -38,6 +48,7 @@ DEFAULT_SHORTCUTS_HELP_TEXT: str = (
     "• Delete selection: Del or Backspace\n"
     "• Cut / Copy / Paste: Ctrl+X / Ctrl+C / Ctrl+V\n"
     "• Undo / Redo: Ctrl+Z / Ctrl+Y\n"
+    "• Run / Pause / Stop: F5 / F6 / F7\n"
     "• Box select: Left-drag on empty canvas\n"
     "• Zoom: Mouse wheel (Ctrl++ / Ctrl+-)\n"
     "• Pan canvas: Middle-drag or Space + Left-drag\n"
@@ -59,6 +70,9 @@ class MainWindow(QMainWindow):
         self.circuit_view = CircuitView(self.circuit_scene)
         self.setCentralWidget(self.circuit_view)
 
+        self.sim_controller = SimulationWorkerController(self)
+        self._sim_state: SimulationState = SimulationState.STOPPED
+
         self._build_menus_and_toolbars()
         self._build_saved_parts_bar()
         self._build_docks()
@@ -71,16 +85,19 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("&File")
-        self.act_new = QAction("&New Circuit", self)
+        self.act_new = QAction("&New", self)
+        self.act_new.setToolTip("Clear schematic and start a new circuit (Ctrl+N)")
         self.act_new.setShortcut(QKeySequence.StandardKey.New)
-        self.act_new.triggered.connect(self.circuit_scene.clear_schematic)
+        self.act_new.triggered.connect(self._on_new_circuit)
         file_menu.addAction(self.act_new)
 
         self.act_open = QAction("&Open...", self)
+        self.act_open.setIconText("Open")
         self.act_open.setShortcut(QKeySequence.StandardKey.Open)
         file_menu.addAction(self.act_open)
 
         self.act_save = QAction("&Save...", self)
+        self.act_save.setIconText("Save")
         self.act_save.setShortcut(QKeySequence.StandardKey.Save)
         file_menu.addAction(self.act_save)
 
@@ -122,29 +139,38 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.act_paste)
 
         self.act_delete = QAction("&Delete", self)
+        self.act_delete.setIconText("Del")
         self.act_delete.setShortcut(QKeySequence.StandardKey.Delete)
         self.act_delete.triggered.connect(self.circuit_scene.delete_selected)
         edit_menu.addAction(self.act_delete)
 
         edit_menu.addSeparator()
         self.act_rotate = QAction("&Rotate (R)", self)
-        self.act_rotate.setToolTip("Rotate selected component(s) 90° clockwise (Shortcut: R)")
+        self.act_rotate.setIconText("Rot")
+        self.act_rotate.setToolTip(
+            "Rotate selected component(s) 90° clockwise (Shortcut: R)"
+        )
         self.act_rotate.triggered.connect(self._rotate_selected)
         edit_menu.addAction(self.act_rotate)
 
         self.act_flip = QAction("&Flip (F)", self)
-        self.act_flip.setToolTip("Flip selected component(s) horizontally (Shortcut: F)")
+        self.act_flip.setIconText("Flip")
+        self.act_flip.setToolTip(
+            "Flip selected component(s) horizontally (Shortcut: F)"
+        )
         self.act_flip.triggered.connect(self._flip_selected)
         edit_menu.addAction(self.act_flip)
 
-        self.act_wire_mode = QAction("&Wire Tool (W)", self, checkable=True)
+        self.act_wire_mode = QAction("&Wire (W)", self, checkable=True)
+        self.act_wire_mode.setIconText("Wire")
         self.act_wire_mode.setToolTip(
             "Toggle Wire Drawing mode (Shortcut: W). You can also drag directly from any terminal."
         )
         self.act_wire_mode.toggled.connect(self.circuit_view.set_wire_mode)
         edit_menu.addAction(self.act_wire_mode)
 
-        self.act_junction = QAction("Toggle &Junction Dot (J)", self)
+        self.act_junction = QAction("&Junction (J)", self)
+        self.act_junction.setIconText("Junc")
         self.act_junction.setToolTip(
             "Place or remove an explicit junction dot at the cursor (Shortcut: J)"
         )
@@ -157,12 +183,14 @@ class MainWindow(QMainWindow):
 
         # View menu
         view_menu = menu_bar.addMenu("&View")
-        self.act_toggle_grid = QAction("Show &Grid (20 px)", self, checkable=True)
+        self.act_toggle_grid = QAction(
+            "Show &Grid (20 px)", self, checkable=True
+        )
         self.act_toggle_grid.setChecked(True)
         self.act_toggle_grid.toggled.connect(self.circuit_scene.set_show_grid)
         view_menu.addAction(self.act_toggle_grid)
 
-        self.act_toggle_theme = QAction("Switch to &Light Theme", self)
+        self.act_toggle_theme = QAction("Light &Theme", self)
         self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+T"))
         self.act_toggle_theme.triggered.connect(self.toggle_theme)
         view_menu.addAction(self.act_toggle_theme)
@@ -184,9 +212,21 @@ class MainWindow(QMainWindow):
 
         # Simulation menu
         sim_menu = menu_bar.addMenu("&Simulation")
-        self.act_run = QAction("&Run", self)
-        self.act_pause = QAction("&Pause", self)
-        self.act_stop = QAction("&Stop", self)
+        self.act_run = QAction("▶ &Run", self)
+        self.act_run.setShortcut(QKeySequence("F5"))
+        self.act_run.setToolTip("Start or resume circuit simulation (F5)")
+        self.act_run.triggered.connect(self.start_simulation)
+
+        self.act_pause = QAction("⏸ &Pause", self)
+        self.act_pause.setShortcut(QKeySequence("F6"))
+        self.act_pause.setToolTip("Pause circuit simulation (F6)")
+        self.act_pause.triggered.connect(self.pause_simulation)
+
+        self.act_stop = QAction("⏹ &Stop", self)
+        self.act_stop.setShortcut(QKeySequence("F7"))
+        self.act_stop.setToolTip("Stop simulation and reset meters/states (F7)")
+        self.act_stop.triggered.connect(self.stop_simulation)
+
         sim_menu.addAction(self.act_run)
         sim_menu.addAction(self.act_pause)
         sim_menu.addAction(self.act_stop)
@@ -198,7 +238,7 @@ class MainWindow(QMainWindow):
         act_reload_svg.triggered.connect(self._reload_custom_svgs)
         help_menu.addAction(act_reload_svg)
 
-        # Main Toolbar (with Undo/Redo, Rotate (R), Flip (F), Delete, Run/Pause/Stop)
+        # Compact Top Toolbar (sized so Speed dropdown is always visible without overflow)
         main_tb = QToolBar("Main Toolbar", self)
         main_tb.setMovable(False)
         main_tb.addAction(self.act_new)
@@ -217,11 +257,13 @@ class MainWindow(QMainWindow):
         main_tb.addAction(self.act_run)
         main_tb.addAction(self.act_pause)
         main_tb.addAction(self.act_stop)
-        main_tb.addSeparator()
-
-        main_tb.addWidget(QLabel("  Speed: "))
+        main_tb.addWidget(QLabel(" Speed:"))
         self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["Real-Time (1x)", "Slow Motion (0.1x)", "Fast (Max)"])
+        self.speed_combo.addItem("1x Real-Time", SimulationSpeed.REAL_TIME.value)
+        self.speed_combo.addItem("0.1x Slow", SimulationSpeed.SLOW_MOTION.value)
+        self.speed_combo.addItem("10x Fast", SimulationSpeed.FAST.value)
+        self.speed_combo.setMinimumWidth(115)
+        self.speed_combo.currentIndexChanged.connect(self._on_speed_combo_changed)
         main_tb.addWidget(self.speed_combo)
         main_tb.addSeparator()
         main_tb.addAction(self.act_toggle_theme)
@@ -241,7 +283,7 @@ class MainWindow(QMainWindow):
                 f"Saved Part Slot {slot_idx} (Shortcut key '{key_label}')\n"
                 "Full save/load configuration will be activated in Milestone 3."
             )
-            btn.setMinimumWidth(92)
+            btn.setMinimumWidth(86)
             saved_tb.addWidget(btn)
             self.saved_slot_buttons.append(btn)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, saved_tb)
@@ -260,7 +302,9 @@ class MainWindow(QMainWindow):
         )
         self.palette_dock.setWidget(self.palette_widget)
         self.palette_dock.setMinimumWidth(240)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.palette_dock)
+        self.addDockWidget(
+            Qt.DockWidgetArea.LeftDockWidgetArea, self.palette_dock
+        )
 
         # 2. Right Dock: Properties / Info Panel
         self.info_dock = QDockWidget("Properties / Info Panel", self)
@@ -269,7 +313,9 @@ class MainWindow(QMainWindow):
         info_layout.setContentsMargins(10, 10, 10, 10)
         self.info_label = QLabel(DEFAULT_SHORTCUTS_HELP_TEXT)
         self.info_label.setWordWrap(True)
-        self.info_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.info_label.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
         info_layout.addWidget(self.info_label)
         self.info_dock.setWidget(info_container)
         self.info_dock.setMinimumWidth(275)
@@ -284,9 +330,11 @@ class MainWindow(QMainWindow):
         )
         scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         scope_layout.addWidget(scope_label)
-        scope_container.setMinimumHeight(90)
+        scope_container.setMinimumHeight(85)
         self.scope_dock.setWidget(scope_container)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.scope_dock)
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, self.scope_dock
+        )
 
         self.instruments_menu.addAction(self.scope_dock.toggleViewAction())
         self.instruments_menu.addAction(self.palette_dock.toggleViewAction())
@@ -295,11 +343,13 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self) -> None:
         sb = self.statusBar()
         self.status_coords = QLabel("Grid: (0, 0) | Pos: (0, 0) px")
-        self.status_zoom = QLabel("Zoom: 100%")
+        self.status_sim = QLabel("Sim: Stopped (t = 0 s)")
         self.status_counts = QLabel("Components: 0 | Wires: 0")
+        self.status_zoom = QLabel("Zoom: 100%")
         self.status_warnings = QLabel("Ready")
 
         sb.addWidget(self.status_coords)
+        sb.addPermanentWidget(self.status_sim)
         sb.addPermanentWidget(self.status_counts)
         sb.addPermanentWidget(self.status_zoom)
         sb.addPermanentWidget(self.status_warnings)
@@ -311,8 +361,119 @@ class MainWindow(QMainWindow):
         self.circuit_view.cursor_grid_moved.connect(self._on_cursor_moved)
         self.circuit_view.zoom_changed.connect(self._on_zoom_changed)
         self.circuit_scene.component_placed.connect(self._on_component_placed)
-        self.circuit_scene.selection_info_changed.connect(self._update_info_panel)
+        self.circuit_scene.selection_info_changed.connect(
+            self._update_info_panel
+        )
         self.circuit_scene.circuit_modified.connect(self._on_circuit_modified)
+        self.circuit_scene.switch_toggled_by_user.connect(
+            self._on_user_switch_toggled
+        )
+        self.circuit_scene.component_parameters_edited.connect(
+            self._on_user_parameters_edited
+        )
+        self.sim_controller.frame_ready.connect(self._on_simulation_frame)
+
+    # ------------------------------------------------------------------
+    # Simulation Controls (Run / Pause / Stop / Speed / Live Edits)
+    # ------------------------------------------------------------------
+
+    def _sync_schematic_to_worker(self) -> None:
+        placed_specs = [
+            item.to_placed_spec() for item in self.circuit_scene.placed_items
+        ]
+        wire_specs = [
+            wire.to_wire_spec() for wire in self.circuit_scene.placed_wires
+        ]
+        self.sim_controller.load_schematic(
+            placed_specs, wire_specs, self.circuit_scene.explicit_junctions
+        )
+
+    def start_simulation(self) -> None:
+        """Send current schematic to the worker thread and start simulation."""
+        if self._sim_state != SimulationState.PAUSED:
+            self._sync_schematic_to_worker()
+        self.sim_controller.start()
+
+    def pause_simulation(self) -> None:
+        """Pause the running simulation."""
+        self.sim_controller.pause()
+
+    def stop_simulation(self) -> None:
+        """Stop simulation and reset meters/states back to t = 0."""
+        self.sim_controller.stop()
+        self.circuit_scene.clear_diagnostics()
+        for item in self.circuit_scene.placed_items:
+            item.reset_live_telemetry()
+        self._sim_state = SimulationState.STOPPED
+        self.status_sim.setText("Sim: Stopped (t = 0 s)")
+        self._refresh_warnings_display()
+
+    def _on_new_circuit(self) -> None:
+        self.stop_simulation()
+        self.circuit_scene.clear_schematic()
+
+    def _on_speed_combo_changed(self, index: int) -> None:
+        raw = self.speed_combo.itemData(index)
+        if raw:
+            self.sim_controller.set_speed(SimulationSpeed(str(raw)))
+
+    def _on_user_switch_toggled(self, switch_name: str, _closed: bool) -> None:
+        if self._sim_state in (SimulationState.RUNNING, SimulationState.PAUSED):
+            self.sim_controller.toggle_switch(switch_name)
+
+    def _on_user_parameters_edited(
+        self, comp_name: str, param_map: object
+    ) -> None:
+        if (
+            isinstance(param_map, dict)
+            and self._sim_state in (SimulationState.RUNNING, SimulationState.PAUSED)
+        ):
+            for k, v in param_map.items():
+                self.sim_controller.update_component_parameter(comp_name, k, v)
+
+    def _on_simulation_frame(self, frame: SimulationFrame) -> None:
+        self._sim_state = frame.state
+        self.circuit_scene.apply_simulation_frame(frame)
+
+        t_str = format_engineering_value(frame.sim_time, "s", sig_figs=3)
+        dt_str = format_engineering_value(frame.dt, "s", sig_figs=3)
+        if frame.state == SimulationState.RUNNING:
+            self.status_sim.setText(
+                f"Sim: Running | t = {t_str} | dt = {dt_str} | Speed: {frame.speed_ratio:.2f}x"
+            )
+        elif frame.state == SimulationState.PAUSED:
+            self.status_sim.setText(
+                f"Sim: Paused | t = {t_str} | dt = {dt_str}"
+            )
+        elif frame.state == SimulationState.ERROR:
+            self.status_sim.setText("Sim: Stopped (Topology Error)")
+        else:
+            self.status_sim.setText("Sim: Stopped (t = 0 s)")
+
+        if frame.diagnostics:
+            # Show most severe diagnostic in status bar
+            errors = [d for d in frame.diagnostics if d.severity == "error"]
+            top_diag = errors[0] if errors else frame.diagnostics[0]
+            if top_diag.severity == "error":
+                self.status_warnings.setStyleSheet(
+                    "color: #FF6B6B; font-weight: 600;"
+                )
+                self.status_warnings.setText(f"Error: {top_diag.message}")
+            else:
+                self.status_warnings.setStyleSheet(
+                    "color: #FFA726; font-weight: 600;"
+                )
+                self.status_warnings.setText(f"Warning: {top_diag.message}")
+        else:
+            self.status_warnings.setStyleSheet("")
+            if frame.state == SimulationState.RUNNING:
+                self.status_warnings.setText("Simulation Running (OK)")
+            else:
+                self._refresh_warnings_display()
+
+    # ------------------------------------------------------------------
+    # Theme & UI Updates
+    # ------------------------------------------------------------------
 
     def apply_theme(self, theme: ThemeMode) -> None:
         """Apply `theme` ('dark' or 'light') across window, palette, and canvas."""
@@ -323,9 +484,10 @@ class MainWindow(QMainWindow):
         self.palette_widget.set_theme(theme)
 
         if theme == ThemeMode.DARK:
-            self.act_toggle_theme.setText("Switch to &Light Theme")
+            self.act_toggle_theme.setText("Light &Theme")
         else:
-            self.act_toggle_theme.setText("Switch to &Dark Theme")
+            self.act_toggle_theme.setText("Dark &Theme")
+        self.act_toggle_theme.setIconText("Theme")
 
         self._refresh_warnings_display()
 
@@ -364,7 +526,9 @@ class MainWindow(QMainWindow):
             ]
             self._update_info_panel(selected[0] if selected else None)
 
-    def _on_cursor_moved(self, x_px: float, y_px: float, gx: int, gy: int) -> None:
+    def _on_cursor_moved(
+        self, x_px: float, y_px: float, gx: int, gy: int
+    ) -> None:
         self.status_coords.setText(
             f"Grid: ({gx}, {gy}) | Pos: ({int(x_px)}, {int(y_px)}) px"
         )
@@ -385,6 +549,8 @@ class MainWindow(QMainWindow):
             if isinstance(it, ComponentItem)
         ]
         self._update_info_panel(selected[0] if selected else None)
+        if self._sim_state == SimulationState.RUNNING:
+            self._sync_schematic_to_worker()
 
     def _update_status_counts(self) -> None:
         n_comp = len(self.circuit_scene.placed_items)
@@ -406,7 +572,11 @@ class MainWindow(QMainWindow):
 
         comp = item.component
         meta = item.metadata
-        val_str = format_component_value_summary(comp) or "—"
+        val_str = (
+            item.live_display_value
+            if item.live_display_value is not None
+            else (format_component_value_summary(comp) or "—")
+        )
         terms = item.terminal_scene_positions()
         conn_res = self.circuit_scene.extract_connectivity_result()
         node_map = conn_res.component_nodes.get(comp.name, {})
@@ -421,6 +591,17 @@ class MainWindow(QMainWindow):
             else "Procedural IEC Fallback"
         )
 
+        v_live = format_engineering_value(comp.voltage, "V")
+        i_live = format_engineering_value(comp.current, "A")
+        p_live = format_engineering_value(comp.power, "W")
+        extra_live = ""
+        if isinstance(comp, Lightbulb):
+            extra_live = f"\n  • Brightness: {comp.brightness_percent:.1f}%"
+            if comp.is_over_bright:
+                extra_live += " (OVER-BRIGHT!)"
+        if item.diagnostic_message:
+            extra_live += f"\n  • Diagnostic: {item.diagnostic_message}"
+
         self.info_label.setText(
             f"Name: {comp.name}\n"
             f"Type: {meta.display_name} ({comp.component_type})\n"
@@ -428,7 +609,16 @@ class MainWindow(QMainWindow):
             f"Value: {val_str}\n"
             f"Position: ({int(item.pos().x())}, {int(item.pos().y())}) px\n"
             f"Rotation: {item.rotation_deg}° | Flipped: {item.flipped_h}\n"
-            f"Footprint: {meta.grid_size[0]}x{meta.grid_size[1]} grid ({meta.pixel_size[0]}x{meta.pixel_size[1]} px)\n"
             f"Symbol Source: {source_kind}\n\n"
-            f"Terminals & Nets:\n{term_lines}"
+            f"Live Operating State:\n"
+            f"  • Voltage: {v_live}\n"
+            f"  • Current: {i_live}\n"
+            f"  • Power: {p_live}{extra_live}\n\n"
+            f"Terminals & Nets:\n{term_lines}\n\n"
+            f"(Double-click {comp.name} on canvas to edit values)"
         )
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Stop the background simulation worker thread cleanly before closing."""
+        self.sim_controller.shutdown()
+        super().closeEvent(event)

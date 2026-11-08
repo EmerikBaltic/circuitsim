@@ -51,6 +51,7 @@ class _BaseMeter(Component):
         self.window_duration: float = max(1e-6, float(window_duration))
         # Buffer of (sim_time, sample_value, dt) tuples for sliding window stats.
         self._samples: deque[tuple[float, float, float]] = deque()
+        self.has_reading: bool = False
 
     @property
     def conductance(self) -> float:
@@ -66,6 +67,7 @@ class _BaseMeter(Component):
         `K * T` contains exactly `K * T / dt` intervals (and does not double-count
         both endpoints of a periodic waveform).
         """
+        self.has_reading = True
         self._samples.append((sim_time, value, max(dt, 0.0)))
         cutoff = sim_time - self.window_duration + 1e-12
         while len(self._samples) > 1 and self._samples[0][0] <= cutoff:
@@ -107,6 +109,7 @@ class _BaseMeter(Component):
         """Clear recorded waveform history and electrical readings."""
         super().reset_state()
         self._samples.clear()
+        self.has_reading = False
 
 
 class Voltmeter(_BaseMeter):
@@ -149,7 +152,9 @@ class Voltmeter(_BaseMeter):
         return self.voltage
 
     def format_reading(self, sig_figs: int = 4) -> str:
-        """Return polarity-aware, auto-ranged voltage string (e.g. '120 V', '-45.2 mV')."""
+        """Return polarity-aware, auto-ranged voltage string (or '-- V' before simulation)."""
+        if not self.has_reading:
+            return "-- V"
         return format_engineering_value(self.reading, unit="V", sig_figs=sig_figs)
 
 
@@ -193,5 +198,7 @@ class Ammeter(_BaseMeter):
         return self.current
 
     def format_reading(self, sig_figs: int = 4) -> str:
-        """Return polarity-aware, auto-ranged current string (e.g. '500 mA', '-12.5 uA')."""
+        """Return polarity-aware, auto-ranged current string (or '-- A' before simulation)."""
+        if not self.has_reading:
+            return "-- A"
         return format_engineering_value(self.reading, unit="A", sig_figs=sig_figs)

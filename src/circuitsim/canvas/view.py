@@ -1,4 +1,4 @@
-"""Interactive QGraphicsView with zoom, pan, wire routing preview, context menu, and drag-and-drop."""
+"""Interactive QGraphicsView with zoom, pan, wire routing preview, switch click, and quick edit."""
 
 from __future__ import annotations
 
@@ -22,12 +22,14 @@ from circuitsim.canvas.component_item import ComponentItem
 from circuitsim.canvas.scene import CircuitScene
 from circuitsim.canvas.symbol_geometry import GRID_PITCH_PX, snap_to_grid
 from circuitsim.canvas.wire_item import WireItem
+from circuitsim.components.switch import Switch
+from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 
 MIME_COMPONENT_ID = "application/x-circuitsim-component-id"
 
 
 class CircuitView(QGraphicsView):
-    """Schematic viewport supporting zoom, pan, interactive wiring, context menus, and undoable edits."""
+    """Schematic viewport supporting zoom, pan, wiring, switch click, and double-click value editing."""
 
     cursor_grid_moved = Signal(float, float, int, int)  # (x_px, y_px, gx, gy)
     zoom_changed = Signal(float)  # Zoom factor (1.0 = 100%)
@@ -46,6 +48,8 @@ class CircuitView(QGraphicsView):
         self._last_scene_pos: QPointF = QPointF(0.0, 0.0)
         self._wire_drag_active: bool = False
         self._wire_mode_enabled: bool = False
+        self._pressed_switch_item: ComponentItem | None = None
+        self._pressed_switch_pos: QPointF = QPointF()
 
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
@@ -116,6 +120,32 @@ class CircuitView(QGraphicsView):
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
+    def open_quick_edit_for_item(self, item: ComponentItem) -> bool:
+        """Open the double-click `QuickValueDialog` for `item` and apply changes live."""
+        comp = item.component
+        if not comp.get_editable_parameters() and not isinstance(comp, Switch):
+            return False
+
+        def _on_apply(parsed_map: dict[str, float], show_val: bool) -> None:
+            for k, v in parsed_map.items():
+                comp.set_parameter_value(k, v)
+            comp.show_value = show_val
+            item.live_display_value = None
+            item.update()
+            self.circuit_scene.component_parameters_edited.emit(
+                comp.name, parsed_map
+            )
+            self.circuit_scene.selection_info_changed.emit(item)
+
+        dlg = QuickValueDialog(comp, on_apply=_on_apply, parent=self.window())
+        dlg.exec()
+        if isinstance(comp, Switch):
+            item.animate_switch_state(comp.closed)
+            self.circuit_scene.switch_toggled_by_user.emit(
+                comp.name, comp.closed
+            )
+        return True
+
     def wheelEvent(self, event: QWheelEvent) -> None:
         """Zoom smoothly around the cursor using the mouse wheel."""
         delta = event.angleDelta().y()
@@ -128,6 +158,7 @@ class CircuitView(QGraphicsView):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         scene_pt: QPointF = self.mapToScene(event.pos())
         self._last_scene_pos = scene_pt
+        self._pressed_switch_item = None
 
         # 1. Middle-click or Space + Left-click panning
         if event.button() == Qt.MouseButton.MiddleButton or (
@@ -167,7 +198,15 @@ class CircuitView(QGraphicsView):
                 event.accept()
                 return
 
-            # Otherwise, prepare for component selection / drag-move
+            # Check if clicking a Switch component body (to toggle on release if not dragged)
+            hit_item = self.circuit_scene.itemAt(scene_pt, self.transform())
+            if isinstance(hit_item, ComponentItem) and isinstance(
+                hit_item.component, Switch
+            ):
+                self._pressed_switch_item = hit_item
+                self._pressed_switch_pos = hit_item.pos()
+
+            # Prepare for component selection / drag-move
             self.circuit_scene.begin_component_move_tracking()
 
         super().mousePressEvent(event)
@@ -217,8 +256,6 @@ class CircuitView(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._wire_drag_active and self.circuit_scene.is_drawing_wire:
                 pts = self.circuit_scene.update_wire_preview(scene_pt)
-                # If the user dragged to a different grid point, finish the wire on release;
-                # if they only clicked without dragging yet, keep preview active for click-to-click wiring!
                 if len(pts) >= 2:
                     self._wire_drag_active = False
                     self.circuit_scene.finish_wire_preview(scene_pt)
@@ -227,29 +264,64 @@ class CircuitView(QGraphicsView):
                     return
 
             super().mouseReleaseEvent(event)
-            self.circuit_scene.commit_component_move_tracking()
+            moved = self.circuit_scene.commit_component_move_tracking()
+            if (
+                not moved
+                and self._pressed_switch_item is not None
+                and self._pressed_switch_item.pos() == self._pressed_switch_pos
+            ):
+                self.circuit_scene.toggle_switch_item(self._pressed_switch_item)
+            self._pressed_switch_item = None
             return
 
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        """Open the Quick Value Dialog when double-clicking a component (Addition #1)."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            scene_pt = self.mapToScene(event.pos())
+            self._pressed_switch_item = None
+            hit_item = self.circuit_scene.itemAt(scene_pt, self.transform())
+            if isinstance(hit_item, ComponentItem):
+                if self.open_quick_edit_for_item(hit_item):
+                    event.accept()
+                    return
+        super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         """Show right-click context menu on components, wires, or canvas (Requirement 7)."""
         scene_pt = self.mapToScene(event.pos())
         self._last_scene_pos = scene_pt
 
-        # If right-clicking an unselected item, select it first
         clicked_item = self.circuit_scene.itemAt(scene_pt, self.transform())
         if isinstance(clicked_item, (ComponentItem, WireItem)) and not clicked_item.isSelected():
             self.circuit_scene.clearSelection()
             clicked_item.setSelected(True)
 
-        has_comp = any(
-            isinstance(it, ComponentItem)
+        selected_comps = [
+            it
             for it in self.circuit_scene.selectedItems()
-        )
+            if isinstance(it, ComponentItem)
+        ]
+        has_comp = bool(selected_comps)
         has_sel = bool(self.circuit_scene.selectedItems())
 
         menu = QMenu(self)
+
+        if len(selected_comps) == 1:
+            target_comp = selected_comps[0]
+            act_edit = QAction("Edit Values...\tDouble-Click", menu)
+            act_edit.triggered.connect(
+                lambda: self.open_quick_edit_for_item(target_comp)
+            )
+            menu.addAction(act_edit)
+            if isinstance(target_comp.component, Switch):
+                act_toggle_sw = QAction("Toggle Switch (ON/OFF)\tClick", menu)
+                act_toggle_sw.triggered.connect(
+                    lambda: self.circuit_scene.toggle_switch_item(target_comp)
+                )
+                menu.addAction(act_toggle_sw)
+            menu.addSeparator()
 
         act_rotate = QAction("Rotate 90° CW\tR", menu)
         act_rotate.setShortcut(QKeySequence("R"))

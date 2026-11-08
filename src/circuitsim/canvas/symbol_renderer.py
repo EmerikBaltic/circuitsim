@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -102,6 +103,7 @@ class SymbolLibrary:
         stroke_color: str = "#E6EDF3",
         show_terminals: bool = True,
         terminal_color: str = "#58A6FF",
+        lever_angle_deg: float | None = None,
     ) -> bool:
         """Paint the symbol centered at `(0, 0)` in `painter` coordinates.
 
@@ -117,12 +119,16 @@ class SymbolLibrary:
             component_id, state=state, stroke_color=stroke_color
         )
         used_svg = False
-        if svg_renderer is not None:
+        if svg_renderer is not None and lever_angle_deg is None:
             svg_renderer.render(painter, target_rect)
             used_svg = True
         else:
             self._paint_procedural_iec(
-                painter, component_id, state=state, stroke_color=stroke_color
+                painter,
+                component_id,
+                state=state,
+                stroke_color=stroke_color,
+                lever_angle_deg=lever_angle_deg,
             )
 
         if show_terminals:
@@ -175,6 +181,7 @@ class SymbolLibrary:
         *,
         state: str | None = None,
         stroke_color: str = "#E6EDF3",
+        lever_angle_deg: float | None = None,
     ) -> None:
         """Built-in procedural IEC 60617 symbol drawing (stroke-width 2, no fill)."""
         painter.save()
@@ -250,10 +257,15 @@ class SymbolLibrary:
             painter.drawLine(QPointF(16.0, 0.0), QPointF(40.0, 0.0))
             painter.drawEllipse(QPointF(-16.0, 0.0), 2.5, 2.5)
             painter.drawEllipse(QPointF(16.0, 0.0), 2.5, 2.5)
-            if state == "closed":
-                painter.drawLine(QPointF(-13.5, 0.0), QPointF(13.5, 0.0))
-            else:
-                painter.drawLine(QPointF(-13.5, -1.0), QPointF(13.0, -13.0))
+            angle = (
+                lever_angle_deg
+                if lever_angle_deg is not None
+                else (0.0 if state == "closed" else 26.0)
+            )
+            rad = math.radians(max(0.0, min(45.0, float(angle))))
+            tip_x = -13.5 + 27.0 * math.cos(rad)
+            tip_y = -27.0 * math.sin(rad)
+            painter.drawLine(QPointF(-13.5, 0.0), QPointF(tip_x, tip_y))
 
         elif component_id == "lightbulb":
             # IEC lamp symbol: circle (r = 15) with diagonal cross ('X') inside

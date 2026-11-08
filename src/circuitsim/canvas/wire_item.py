@@ -52,6 +52,8 @@ class WireItem(QGraphicsObject):
         )
         self._path: QPainterPath = QPainterPath()
         self._hit_shape: QPainterPath = QPainterPath()
+        self.diagnostic_severity: str | None = None
+        self.diagnostic_message: str = ""
         self._rebuild_paths()
 
         if not is_preview:
@@ -81,6 +83,17 @@ class WireItem(QGraphicsObject):
     def set_theme(self, theme: ThemeMode) -> None:
         """Update theme color and repaint."""
         self.theme = theme
+        self.update()
+
+    def set_diagnostic(
+        self, severity: str | None, message: str = ""
+    ) -> None:
+        """Set or clear canvas problem highlighting on this wire."""
+        if self.diagnostic_severity == severity and self.diagnostic_message == message:
+            return
+        self.diagnostic_severity = severity
+        self.diagnostic_message = message
+        self.setToolTip(message)
         self.update()
 
     def to_wire_spec(self) -> WireSpec:
@@ -162,6 +175,34 @@ class WireItem(QGraphicsObject):
                 Qt.PenJoinStyle.MiterJoin,
             )
             painter.setPen(main_pen)
+            painter.drawPath(self._path)
+        elif self.diagnostic_severity in ("error", "warning"):
+            diag_col = (
+                QColor("#FF5252")
+                if self.diagnostic_severity == "error"
+                else QColor("#FFA726")
+            )
+            glow_col = QColor(diag_col)
+            glow_col.setAlpha(85)
+            painter.setPen(
+                QPen(
+                    glow_col,
+                    5.5,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            painter.drawPath(self._path)
+            painter.setPen(
+                QPen(
+                    diag_col,
+                    2.4,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.MiterJoin,
+                )
+            )
             painter.drawPath(self._path)
         else:
             pen = QPen(

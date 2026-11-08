@@ -1,6 +1,6 @@
 """Component physics models for CircuitSim (no Qt dependencies)."""
 
-from circuitsim.components.base import Component
+from circuitsim.components.base import Component, ComponentParameter
 from circuitsim.components.capacitor import Capacitor
 from circuitsim.components.ground import Ground
 from circuitsim.components.inductor import Inductor
@@ -20,6 +20,7 @@ __all__ = [
     "Ammeter",
     "Capacitor",
     "Component",
+    "ComponentParameter",
     "DCCurrentSource",
     "DCVoltageSource",
     "Ground",
