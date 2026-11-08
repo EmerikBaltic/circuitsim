@@ -89,6 +89,20 @@ class CircuitView(QGraphicsView):
         self._zoom_factor = 1.0
         self.zoom_changed.emit(self._zoom_factor)
 
+    def view_center(self) -> tuple[float, float]:
+        """Return the scene point shown in the middle of the viewport (saved as 'pan')."""
+        c = self.mapToScene(self.viewport().rect().center())
+        return (c.x(), c.y())
+
+    def set_view_state(self, zoom: float, center: tuple[float, float]) -> None:
+        """Restore a saved zoom level (clamped to the allowed range) and view centre."""
+        zoom = min(max(float(zoom), self.MIN_ZOOM), self.MAX_ZOOM)
+        self.resetTransform()
+        self.scale(zoom, zoom)
+        self._zoom_factor = zoom
+        self.centerOn(float(center[0]), float(center[1]))
+        self.zoom_changed.emit(self._zoom_factor)
+
     def zoom_in(self) -> None:
         self._apply_zoom(self.ZOOM_STEP)
 

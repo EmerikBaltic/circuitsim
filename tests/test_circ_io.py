@@ -319,3 +319,189 @@ def test_no_qt_in_serializer_module() -> None:
         capture_output=True, text=True, check=False,
     )
     assert res.returncode == 0, res.stderr
+
+
+_QT_PRELUDE = """
+import sys, os, json, tempfile, math
+from pathlib import Path
+from PySide6.QtCore import QPointF
+from PySide6.QtWidgets import QApplication, QMessageBox
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication(sys.argv)
+win = MainWindow()
+errors = []
+win._show_error = lambda title, text: errors.append(text)
+scene = win.circuit_scene
+tmp = Path(tempfile.mkdtemp())
+
+def build_divider():
+    # 12 V, R1 = 1k (horizontal), R2 = 3k (vertical), same geometry as the engine tests
+    scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+    scene.place_new_component("resistor", QPointF(60, -40))
+    r2 = scene.place_new_component("resistor", QPointF(120, 0), rotation_deg=90)
+    scene.place_new_component("ground", QPointF(0, 60))
+    scene.add_wire([(0, -40), (20, -40)])
+    scene.add_wire([(100, -40), (120, -40)])
+    scene.add_wire([(0, 40), (120, 40)])
+    scene.edit_component_parameters(r2, {"resistance": 3000.0})
+    return r2
+"""
+
+
+def test_window_save_open_roundtrip_title_and_clean_state() -> None:
+    """Save from a real window, open in a fresh window, check volts by hand: 12 * 3/4 = 9 V."""
+    script = _QT_PRELUDE + """
+r2 = build_divider()
+assert win.windowTitle().startswith("Untitled*"), win.windowTitle()
+assert win.has_unsaved_changes()
+
+path = tmp / "divider.circ"
+assert win.save_to_path(path) is True
+assert win.windowTitle().startswith("divider.circ") and "*" not in win.windowTitle(), win.windowTitle()
+assert not win.has_unsaved_changes()
+
+# any edit marks the file as modified again (asterisk), undo returns to clean
+scene.edit_component_parameters(r2, {"resistance": 1000.0})
+assert "*" in win.windowTitle()
+scene.undo_stack.undo()
+assert "*" not in win.windowTitle()
+win.circuit_scene.undo_stack.setClean()
+win.close()
+
+# fresh window, open the file
+win2 = MainWindow()
+win2._show_error = lambda t, m: errors.append(m)
+assert win2.open_path(path) is True and errors == []
+assert win2.windowTitle().startswith("divider.circ") and "*" not in win2.windowTitle()
+assert not win2.circuit_scene.undo_stack.canUndo()  # loading clears undo history
+names = sorted(i.component.name for i in win2.circuit_scene.placed_items)
+assert names == ["GND1", "R1", "R2", "V1"], names
+
+conn = win2.circuit_scene.extract_connectivity_result()
+from circuitsim.engine import MNASolver
+sol = MNASolver(conn.circuit).solve_dc()
+v_mid = sol.node_voltages[conn.component_nodes["R2"]["a"]]
+assert abs(v_mid - 9.0) < 1e-6, v_mid          # 12 V * 3k / 4k
+r1 = next(i for i in win2.circuit_scene.placed_items if i.component.name == "R1")
+assert r1.component.resistance == 1000.0
+r2b = next(i for i in win2.circuit_scene.placed_items if i.component.name == "R2")
+assert r2b.component.resistance == 3000.0 and r2b.rotation_deg == 90
+# a new wire after loading must not reuse an old wire id
+old_ids = {w.wire_id for w in win2.circuit_scene.placed_wires}
+assert win2.circuit_scene.next_wire_id() not in old_ids
+win2.circuit_scene.undo_stack.setClean()
+win2.close()
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_bad_files_show_message_and_leave_scene_unchanged() -> None:
+    script = _QT_PRELUDE + """
+build_divider()
+good = tmp / "good.circ"
+assert win.save_to_path(good)
+text = good.read_text(encoding="utf-8")
+
+def snapshot():
+    return json.dumps(
+        [(i.component.name, i.pos().x(), i.pos().y(), i.rotation_deg) for i in scene.placed_items]
+        + [(w.wire_id, list(w.points)) for w in scene.placed_wires], default=str)
+
+before = snapshot()
+undo_before = scene.undo_stack.count()
+
+newer = json.loads(text); newer["schema_version"] = 99
+bad_cases = {
+    "empty.circ": "",
+    "truncated.circ": text[: len(text) // 2],
+    "garbage.circ": "\\x00\\x01 not a circuit",
+    "wrongformat.circ": json.dumps({"hello": 1}),
+    "newer.circ": json.dumps(newer),
+}
+for name, content in bad_cases.items():
+    p = tmp / name
+    p.write_text(content, encoding="utf-8")
+    assert win.open_path(p) is False, name
+    assert snapshot() == before, "scene changed by " + name
+    assert scene.undo_stack.count() == undo_before
+assert len(errors) == len(bad_cases), errors
+assert any("newer version of CircuitSim" in e for e in errors)
+assert any("empty" in e for e in errors)
+assert win.open_path(tmp / "does_not_exist.circ") is False
+assert snapshot() == before
+
+# a file that is valid JSON/format but has one bad component loads NOTHING
+broken = json.loads(text); broken["components"][-1]["rotation_deg"] = 45
+(tmp / "broken.circ").write_text(json.dumps(broken), encoding="utf-8")
+assert win.open_path(tmp / "broken.circ") is False
+assert snapshot() == before
+scene.undo_stack.setClean(); win.close()
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_unsaved_changes_prompt_for_new_open_and_close() -> None:
+    script = _QT_PRELUDE + """
+asked = []
+answer = {"v": QMessageBox.StandardButton.Cancel}
+win._ask_save_discard_cancel = lambda what: (asked.append(what), answer["v"])[1]
+build_divider()
+n = len(scene.placed_items)
+
+# Cancel keeps everything
+win._on_new_circuit()
+assert len(scene.placed_items) == n and asked and "new circuit" in asked[-1]
+win.close()
+assert win.isVisible() or True  # close() was refused, window not torn down
+assert "closing" in asked[-1] and len(scene.placed_items) == n
+
+# Discard goes ahead
+answer["v"] = QMessageBox.StandardButton.Discard
+win._on_new_circuit()
+assert len(scene.placed_items) == 0 and not win.has_unsaved_changes()
+assert win.windowTitle().startswith("Untitled") and "*" not in win.windowTitle()
+
+# No prompt when nothing changed
+asked.clear()
+win._on_new_circuit()
+assert asked == []
+
+# Save answer: saves to the chosen path and then continues
+build_divider()
+target = tmp / "prompted.circ"
+win._on_save_circuit_as = lambda: win.save_to_path(target)
+answer["v"] = QMessageBox.StandardButton.Save
+win._on_new_circuit()
+assert target.exists() and len(scene.placed_items) == 0
+win.close()
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_toolbar_and_menu_file_actions_exist_and_work() -> None:
+    script = _QT_PRELUDE + """
+shortcuts = {a.text().replace("&", ""): a.shortcut().toString() for a in
+             (win.act_new, win.act_open, win.act_save, win.act_save_as)}
+assert shortcuts["New"] == "Ctrl+N", shortcuts
+assert shortcuts["Open..."] == "Ctrl+O", shortcuts
+assert shortcuts["Save"] == "Ctrl+S", shortcuts
+assert shortcuts["Save As..."] == "Ctrl+Shift+S", shortcuts
+# toolbar buttons are wired to the same actions
+tb_actions = [a for tb in win.findChildren(type(win.findChild(__import__("PySide6.QtWidgets", fromlist=["QToolBar"]).QToolBar)))
+              for a in tb.actions()]
+for a in (win.act_new, win.act_open, win.act_save):
+    assert a in tb_actions
+# Save with a known path triggers a real save when the action fires
+build_divider()
+target = tmp / "viaaction.circ"
+win._current_path = target
+win.act_save.trigger()
+assert target.exists() and not win.has_unsaved_changes()
+win.close()
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"

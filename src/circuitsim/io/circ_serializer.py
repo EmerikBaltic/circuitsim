@@ -149,9 +149,8 @@ def _component_to_dict(spec: PlacedComponentSpec) -> dict[str, Any]:
             settings[key] = str(getattr(raw, "value", raw))
         else:
             settings[key] = None if raw is None else float(raw)
-    # A switch is saved in the position it was placed in, not mid-simulation.
-    if ctype == "switch":
-        settings["closed"] = bool(getattr(comp, "initial_closed", comp.closed))
+    # Note: for a switch "closed" is the position shown on the canvas (what the
+    # user sees), so that is what gets saved.
 
     return {
         "type": ctype,

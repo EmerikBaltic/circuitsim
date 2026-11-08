@@ -625,6 +625,7 @@ QTimer.singleShot(60, stop_loop.quit)
 stop_loop.exec()
 assert vm1.component.format_reading() == "-- V", f"Expected '-- V' after Stop, got {vm1.component.format_reading()!r}"
 
+win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
 win.close()
 """
     res = subprocess.run(
@@ -715,6 +716,7 @@ assert r1.component.resistance == 500.0
 assert r1.live_display_value == "500 Ω"
 assert a1.live_display_value == "24 mA", f"Expected 24 mA after Redo while running, got {a1.live_display_value!r}"
 
+win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
 win.close()
 """
     res = subprocess.run(
@@ -753,6 +755,7 @@ QTimer.singleShot(80, loop.quit)
 loop.exec()
 
 assert win.sim_controller._thread.isRunning() is True, "Worker QThread should be running during simulation"
+win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
 win.close()
 app.processEvents()
 assert win.sim_controller._thread.isRunning() is False, "Worker QThread must stop cleanly when MainWindow closes"
@@ -831,6 +834,7 @@ assert w_top.effective_highlight_color() is None
 assert w_bot.effective_highlight_color() is None
 assert win.status_warnings.text() == "Simulation Running (OK)"
 
+win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
 win.close()
 """
     res = subprocess.run(
@@ -917,6 +921,7 @@ assert win._sim_state.value == "running", f"Expected running state, got {win._si
 assert ui_heartbeats >= 12, f"Expected >= 12 UI heartbeats during 300 ms ladder run, got {ui_heartbeats}"
 assert max_gap_ms < threshold_ms, f"Main UI thread stalled for {max_gap_ms:.2f} ms (threshold {threshold_ms:.1f} ms)"
 
+win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
 win.close()
 """
     res = subprocess.run(

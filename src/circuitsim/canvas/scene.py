@@ -51,6 +51,7 @@ from circuitsim.engine.simulation_session import (
     SimulationFrame,
     SimulationState,
 )
+from circuitsim.io.circ_serializer import CircuitDocument, CircuitFileError, ViewState
 
 
 @dataclass(frozen=True)
@@ -981,6 +982,92 @@ class CircuitScene(QGraphicsScene):
         ]
         if selected:
             self.selection_info_changed.emit(selected[0])
+
+    # ------------------------------------------------------------------
+    # Save / Load (.circ) support
+    # ------------------------------------------------------------------
+
+    def to_document(self, view: ViewState | None = None) -> CircuitDocument:
+        """Snapshot the schematic as a Qt-free `CircuitDocument` ready to be saved."""
+        return CircuitDocument(
+            placed=[item.to_placed_spec() for item in self._placed_items],
+            wires=[wire.to_wire_spec() for wire in self._wire_items],
+            junctions=sorted(self._explicit_junctions),
+            view=view if view is not None else ViewState(theme=self.theme.value),
+        )
+
+    def load_document(self, doc: CircuitDocument) -> None:
+        """Replace the whole schematic with `doc`, all-or-nothing.
+
+        Step 1 builds every new item without touching the scene. If anything
+        goes wrong there, `CircuitFileError` is raised and the current circuit
+        is left exactly as it was. Step 2 (the swap) only runs after step 1
+        succeeded and contains no code that can reasonably fail.
+        """
+        try:
+            new_items: list[ComponentItem] = []
+            for spec in doc.placed:
+                item = ComponentItem(
+                    spec.component,
+                    self.symbol_library,
+                    theme=self.theme,
+                    is_ghost=False,
+                )
+                item.setPos(float(spec.center_px[0]), float(spec.center_px[1]))
+                item.set_rotation_deg(spec.rotation_deg)
+                item.set_flipped_h(spec.flipped_h)
+                new_items.append(item)
+            new_wires = [
+                WireItem(w.wire_id, tuple(w.points), theme=self.theme)
+                for w in doc.wires
+            ]
+            new_junctions = {
+                normalize_point_px(p, snap=True) for p in doc.junctions
+            }
+            # Dry run of netlist extraction: proves the circuit can be analysed.
+            extract_connectivity(
+                [it.to_placed_spec() for it in new_items],
+                [w.to_wire_spec() for w in new_wires],
+                new_junctions,
+                symbol_catalog=self.symbol_library.metadata_catalog,
+            )
+        except CircuitFileError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - any failure must keep old scene
+            raise CircuitFileError(
+                f"The circuit in this file could not be built ({exc}). "
+                "Your current circuit was not changed."
+            ) from exc
+
+        # ---- point of no return: swap old for new ----
+        self.hide_ghost_preview()
+        self.cancel_wire_preview()
+        for wire in list(self._wire_items):
+            self.removeItem(wire)
+        for item in list(self._placed_items):
+            self.removeItem(item)
+        self._wire_items = []
+        self._placed_items = []
+        self._counters.clear()
+        self._explicit_junctions = new_junctions
+        for item in new_items:
+            self._placed_items.append(item)
+            self.addItem(item)
+        for wire in new_wires:
+            self._wire_items.append(wire)
+            self.addItem(wire)
+        # Keep future wire ids unique: continue after the highest loaded "W<n>".
+        numbers = [
+            int(w.wire_id[1:])
+            for w in new_wires
+            if w.wire_id.startswith("W") and w.wire_id[1:].isdigit()
+        ]
+        self._wire_counter = max(numbers, default=0)
+        self.undo_stack.clear()  # a freshly loaded file has no undo history
+        self.clearSelection()
+        self.refresh_connectivity_visuals()
+        self.selection_info_changed.emit(None)
+        self.update()
 
     def clear_schematic(self) -> None:
         """Remove all placed components, wires, junctions, and clear the undo stack."""

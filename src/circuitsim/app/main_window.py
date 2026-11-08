@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QToolBar,
     QVBoxLayout,
@@ -28,6 +32,12 @@ from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.view import CircuitView
 from circuitsim.components.lightbulb import Lightbulb
 from circuitsim.dialogs.value_parser import format_engineering_value
+from circuitsim.io.circ_serializer import (
+    CircuitFileError,
+    ViewState,
+    load_document,
+    save_document,
+)
 from circuitsim.engine.simulation_session import (
     SimulationFrame,
     SimulationSpeed,
@@ -75,13 +85,18 @@ class MainWindow(QMainWindow):
         self.sim_controller = SimulationWorkerController(self)
         self._sim_state: SimulationState = SimulationState.STOPPED
         self._last_error_reason: str = ""
+        self._current_path: Path | None = None
 
         self._build_menus_and_toolbars()
         self._build_saved_parts_bar()
         self._build_docks()
         self._build_status_bar()
         self._connect_signals()
+        self.circuit_scene.undo_stack.cleanChanged.connect(
+            lambda _clean: self._update_window_title()
+        )
         self.apply_theme(self.theme)
+        self._update_window_title()
 
     def _build_menus_and_toolbars(self) -> None:
         menu_bar = self.menuBar()
@@ -98,13 +113,21 @@ class MainWindow(QMainWindow):
         self.act_open.setIconText("Open")
         self.act_open.setToolTip("Open a saved circuit file (Ctrl+O)")
         self.act_open.setShortcut(QKeySequence.StandardKey.Open)
+        self.act_open.triggered.connect(self._on_open_circuit)
         file_menu.addAction(self.act_open)
 
-        self.act_save = QAction("&Save...", self)
+        self.act_save = QAction("&Save", self)
         self.act_save.setIconText("Save")
         self.act_save.setToolTip("Save current circuit to file (Ctrl+S)")
         self.act_save.setShortcut(QKeySequence.StandardKey.Save)
+        self.act_save.triggered.connect(self._on_save_circuit)
         file_menu.addAction(self.act_save)
+
+        self.act_save_as = QAction("Save &As...", self)
+        self.act_save_as.setToolTip("Save the circuit under a new name (Ctrl+Shift+S)")
+        self.act_save_as.setShortcut(QKeySequence.StandardKey.SaveAs)
+        self.act_save_as.triggered.connect(self._on_save_circuit_as)
+        file_menu.addAction(self.act_save_as)
 
         file_menu.addSeparator()
         act_exit = QAction("E&xit", self)
@@ -500,9 +523,129 @@ class MainWindow(QMainWindow):
         self.status_sim.setText("Sim: Stopped (t = 0 s)")
         self._refresh_warnings_display()
 
+    # ------------------------------------------------------------------
+    # File handling: New / Open / Save / Save As (.circ)
+    # ------------------------------------------------------------------
+
+    def _update_window_title(self) -> None:
+        """Show '<file name>*' (asterisk = unsaved changes) in the title bar."""
+        name = self._current_path.name if self._current_path else "Untitled"
+        star = "" if self.circuit_scene.undo_stack.isClean() else "*"
+        self.setWindowTitle(f"{name}{star} — CircuitSim")
+
+    def has_unsaved_changes(self) -> bool:
+        return not self.circuit_scene.undo_stack.isClean()
+
+    def _show_error(self, title: str, text: str) -> None:
+        """Friendly error box (separate method so tests can replace it)."""
+        QMessageBox.warning(self, title, text)
+
+    def _ask_save_discard_cancel(self, what: str) -> QMessageBox.StandardButton:
+        """Ask the user what to do with unsaved changes (separate method for tests)."""
+        return QMessageBox.question(
+            self,
+            "Unsaved changes",
+            f"The circuit has unsaved changes.\nSave them before {what}?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+
+    def _confirm_discard_changes(self, what: str) -> bool:
+        """Return True if it is fine to continue (nothing to lose, saved, or discarded)."""
+        if not self.has_unsaved_changes():
+            return True
+        answer = self._ask_save_discard_cancel(what)
+        if answer == QMessageBox.StandardButton.Save:
+            return self._on_save_circuit()
+        return answer == QMessageBox.StandardButton.Discard
+
+    def _current_view_state(self) -> ViewState:
+        speed = self.speed_combo.currentData()
+        return ViewState(
+            theme=self.theme.value,
+            zoom=self.circuit_view.zoom_factor,
+            pan=self.circuit_view.view_center(),
+            simulation_speed=str(speed) if speed else SimulationSpeed.REAL_TIME.value,
+        )
+
     def _on_new_circuit(self) -> None:
+        if not self._confirm_discard_changes("starting a new circuit"):
+            return
         self.stop_simulation()
         self.circuit_scene.clear_schematic()
+        self._current_path = None
+        self._update_window_title()
+
+    def _on_open_circuit(self) -> None:
+        if not self._confirm_discard_changes("opening another file"):
+            return
+        start_dir = str(self._current_path.parent) if self._current_path else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open circuit", start_dir, "CircuitSim circuits (*.circ);;All files (*)"
+        )
+        if path:
+            self.open_path(path)
+
+    def open_path(self, path: str | Path) -> bool:
+        """Load a `.circ` file. On any problem show a message and change nothing."""
+        p = Path(path)
+        try:
+            doc = load_document(p)  # reads + validates; builds new objects only
+            self.circuit_scene.load_document(doc)  # all-or-nothing swap
+        except CircuitFileError as exc:
+            self._show_error("Could not open file", str(exc))
+            return False
+        except Exception as exc:  # noqa: BLE001 - never crash on a bad file
+            self._show_error(
+                "Could not open file",
+                f"Something unexpected went wrong while opening '{p.name}' ({exc}). "
+                "Your current circuit was not changed.",
+            )
+            return False
+
+        self.stop_simulation()
+        if doc.view.theme != self.theme.value:
+            self.apply_theme(ThemeMode(doc.view.theme))
+        idx = self.speed_combo.findData(doc.view.simulation_speed)
+        if idx >= 0:
+            self.speed_combo.setCurrentIndex(idx)
+        self.circuit_view.set_view_state(doc.view.zoom, doc.view.pan)
+        self._current_path = p
+        self._update_window_title()
+        self.statusBar().showMessage(f"Opened {p.name}", 4000)
+        return True
+
+    def save_to_path(self, path: str | Path) -> bool:
+        """Save the circuit to `path`; show a message and return False on failure."""
+        p = Path(path)
+        try:
+            save_document(p, self.circuit_scene.to_document(self._current_view_state()))
+        except CircuitFileError as exc:
+            self._show_error("Could not save file", str(exc))
+            return False
+        self.circuit_scene.undo_stack.setClean()
+        self._current_path = p
+        self._update_window_title()
+        self.statusBar().showMessage(f"Saved {p.name}", 4000)
+        return True
+
+    def _on_save_circuit(self) -> bool:
+        if self._current_path is None:
+            return self._on_save_circuit_as()
+        return self.save_to_path(self._current_path)
+
+    def _on_save_circuit_as(self) -> bool:
+        start = str(self._current_path) if self._current_path else "circuit.circ"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save circuit as", start, "CircuitSim circuits (*.circ)"
+        )
+        if not path:
+            return False
+        if not path.lower().endswith(".circ"):
+            path += ".circ"
+        return self.save_to_path(path)
 
     def _on_speed_combo_changed(self, index: int) -> None:
         raw = self.speed_combo.itemData(index)
@@ -717,6 +860,9 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Stop the background simulation worker thread cleanly before closing."""
+        """Ask about unsaved changes, then stop the simulation worker thread cleanly."""
+        if not self._confirm_discard_changes("closing the window"):
+            event.ignore()
+            return
         self.sim_controller.shutdown()
         super().closeEvent(event)
