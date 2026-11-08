@@ -1,6 +1,6 @@
 # Project Progress — CircuitSim
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Lettered Items A-G Done (180 Passing Tests)
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Lettered Items A-G & Numbered Items 1-3 Done (190 Passing Tests)
 
 ### What Is Done
 - **Environment, Licensing & Editable Package Installation**:
@@ -54,21 +54,40 @@
   - **Root Cause**: Tests involving Qt widgets are executed in isolated subprocesses (`_run_qt` via `sys.executable -c`) to enforce the strict architectural rule that pure-Python physics, connectivity, and serializer modules have zero Qt imports in `sys.modules`. On Windows, each subprocess invocation incurs Python startup and dynamic loading of large PySide6 DLLs (~1.5–2.5 s per process). By contrast, all 130+ pure-Python unit tests complete in under 2 seconds combined (<0.02 s each).
   - **Optimization Assessment**: Running Qt tests in-process would reduce test suite duration to <10 s, but would contaminate `sys.modules` and weaken the isolation tests that prove physics and IO code remain Qt-free. The current architecture should be left alone because 43 s is fast enough for CI/local verification while providing absolute architectural guarantees.
 
-- **Item G (Plan Only: Explicit Wires & Junctions Architecture Plan)**:
-  ```text
-  1. Data Model: Pure-Python NetGraph; edges are straight runs WireSegment(id, p1=(x1,y1), p2=(x2,y2)); explicit Junction(id, pos=(x,y)) for node degree >= 3. Multi-bend polylines decompose into segments.
-  2. Qt-Free Logic: Core lives in circuitsim.wiring.net_graph & circuitsim.canvas.connectivity (0 Qt imports); canvas WireItem and JunctionItem are thin view projections reflecting NetGraph updates.
-  3. File Format: Schema v2 stores segment list + explicit junctions; migrate_v1_to_v2() splits legacy v1 polylines, resolves T-intersections, deduplicates collinear runs, and upgrades seamlessly in-memory.
-  4. Tests: Existing netlist extraction tests verify identical MNA matrices; wire drawing/moving tests adapt from polyline arrays to segment collections while preserving all coverage.
-  5. Stepped Commits:
-     - Commit 1 (~120 LOC): NetGraph and WireSegment pure-Python data structures with graph topology unit tests.
-     - Commit 2 (~140 LOC): Schema v2 serializer, v1->v2 migration, and .circ save/load round-trip tests.
-     - Commit 3 (~160 LOC): Update connectivity.py Union-Find and wire splitting to operate on NetGraph segments.
-     - Commit 4 (~150 LOC): Connect canvas WireItem/JunctionItem and interactive routing tools to NetGraph.
-  6. Risks & Mitigation:
-     - Risk 1: Collinear overlapping segments creating micro-loops. Mitigate with 1D interval merging on orthogonal lines before graph insertion.
-     - Risk 2: Dragging/rotating parts causing non-orthogonal angles. Mitigate by re-running orthogonal detour routing on move.
-  ```
+- **Recent Quality & Usability Tasks**:
+  - **Item 1 (Commit List for Items A–E and Docs)**:
+    - `eee01f6`: `Item A: Fix painter transform order to match symbol terminal geometry and add polarity regression tests`
+    - `9368dd9`: `Item B: Implement precision shape and tight boundingRect matching rotated symbols, ensuring label plates do not intercept clicks`
+    - `95efe4f`: `Item C: Safe orthogonal wire re-routing avoiding component body penetration and tangle shorts on rotation and dragging`
+    - `36b90ea`: `Item D: Precise 10 px wire terminal snapping, hover highlighting, and connection guarantees`
+    - `c5f6fcc`: `Item E: Verify save and load round-trip on rotated and flipped circuits preserves wire connections, polarity, and simulation voltages`
+    - `f86a89e`: `Item E: Unify symbol rendering and terminal coordinate transforms with save/load regression tests` (Item E shared two commits)
+    - `f3539df`: `Item F and G: Document test suite speed profiling analysis and explicit wiring architecture plan` (Docs for F and G shared commit f3539df)
+  - **Item 2 (Canvas View & Dock Stability on Selection / Clicks)**:
+    - *Root Cause*: Dock width dynamically followed `info_label.sizeHint()` across selection changes (`DEFAULT_SHORTCUTS_HELP_TEXT` vs component text), resizing the viewport. Combined with `AnchorViewCenter`, this shifted the scene under the cursor by up to 58 px and triggered unintended 20 px grid-snap dragging on click.
+    - *Fix*: Locked `info_dock` to fixed width (280 px), wrapped contents inside `QScrollArea`, set `info_label` size policy to `Ignored` horizontally with `wordWrap=True`, locked `palette_dock` (240 px) and `statusBar` (height 26 px, grip disabled), switched `CircuitView` to `NoAnchor`, and introduced a 4 px drag threshold suppressing mouse move jitter on clicks. Verified via `tests/test_view_stability.py`.
+  - **Item 3 (Unified Drawing & Netlist Polarity via `polarity_mark_positions`)**:
+    - Implemented pure-Python `polarity_mark_positions(part_type, rotation_deg, flipped_h, center_px)` in `symbol_geometry.py` using `transform_terminal_position` as the single geometric source of truth.
+    - Updated `symbol_renderer.py` to paint `+`, `-`, current arrow and meter polarity in upright coordinates directly from this function with optional `polarity_color`.
+    - Added `tests/test_drawing_polarity.py` (8 pure-Python hand-worked tests + offscreen Qt test asserting `+` mark pixel centroid in rendered `QImage` is nearer `pos` than `neg` across all 8 orientations).
+  - **Item 4 (Revised Plan: Attachment-Based Wires & Junctions — Plan Only, No Code)**:
+    ```text
+    1. Data Model: Wire has two ends. Each end is an Attachment: TerminalRef(comp_name, term_name), JunctionRef(junction_id), or FreeEnd(x, y). Junction has id and pos; created only explicitly (placed by user or splitting a wire when ending on it).
+    2. Electrical Connectivity: Pure Union-Find over TerminalRefs and JunctionRefs connected through Wires (circuitsim.wiring.connectivity). Coordinates play zero part; crossing/overlapping wires never connect; moving components/junctions never alters connectivity.
+    3. Route Generation: Pure function route(start_pos, end_pos, obstacles) -> tuple[PointPx, ...] (no Qt, deterministic, stable while dragging); replaces the 40 px detour heuristic. Waypoint drags stored as optional routing hints only.
+    4. Visual Projection: JunctionItem drawn as dot only when degree >= 3; merges into a bend when degree drops to 2. JunctionItems are selectable and draggable, with attached wires following live. FreeEnd drawn with hollow marker; snap radius attaches to terminal.
+    5. Schema v2 & Migration: Schema v2 stores explicit attachments and junction list. V1 loader runs legacy geometric extraction once to compute connectivity, generates attachments, and upgrades seamlessly; verified with identical simulation voltages.
+    6. Tests Affected: test_connectivity_and_editing.py adapts from raw coordinate arrays to Wire(start_ref, end_ref); crossing-wire and collinear tests become structural assertions. V1 tests in test_circ_io.py verify migration.
+    7. Replaces from C & D: Replaces _route_cuts_box detour heuristic and geometric wire endpoint mutation on move (Item C); adapts 10 px snap (Item D) to bind FreeEnd to TerminalRef.
+    8. Stepped Commits & Size:
+       - Step 1 (Medium): Pure-Python wiring model (TerminalRef, JunctionRef, FreeEnd, Wire, Junction, Union-Find netlist builder) with graph unit tests.
+       - Step 2 (Medium): Pure-Python route(start, end, obstacles) orthogonal pathfinder replacing detour heuristic.
+       - Step 3 (Small): File format schema v2 serializer and v1 migration runner with voltage-equivalence tests.
+       - Step 4 (Large): Canvas integration (WireItem, JunctionItem, split-on-drop, degree-2 merge, free-end hollow markers, drag-move tracking).
+    9. Risks:
+       - Interactive drag oscillation/hunting between symmetrical routes. Mitigation: Route caching with H-first/V-first orientation latching.
+       - V1 migration edge cases with unattached floating wire clusters. Mitigation: Cluster grouping via legacy Union-Find before attachment synthesis.
+    ```
 
 ### What Is Next (Milestone 3)
 - **Step 3C** (full properties dialog) remains. Step 3A is done, and Step 3B is cancelled by design decision.
@@ -85,6 +104,6 @@
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (180 tests)
+# Run the full test suite (190 tests)
 .\.venv\Scripts\pytest.exe
 ```
