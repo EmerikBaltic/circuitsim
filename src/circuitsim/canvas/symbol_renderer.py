@@ -13,6 +13,7 @@ from circuitsim.canvas.symbol_geometry import (
     DEFAULT_IEC_SYMBOLS_DIR,
     SymbolMetadata,
     load_all_iec_metadata,
+    polarity_mark_positions,
     prepare_svg_for_theme,
 )
 
@@ -101,6 +102,7 @@ class SymbolLibrary:
         *,
         state: str | None = None,
         stroke_color: str = "#E6EDF3",
+        polarity_color: str | None = None,
         show_terminals: bool = True,
         terminal_color: str = "#58A6FF",
         lever_angle_deg: float | None = None,
@@ -130,6 +132,7 @@ class SymbolLibrary:
                 component_id,
                 state=state,
                 stroke_color=stroke_color,
+                polarity_color=polarity_color,
                 lever_angle_deg=lever_angle_deg,
                 rotation_deg=rotation_deg,
                 flipped_h=flipped_h,
@@ -185,6 +188,7 @@ class SymbolLibrary:
         *,
         state: str | None = None,
         stroke_color: str = "#E6EDF3",
+        polarity_color: str | None = None,
         lever_angle_deg: float | None = None,
         rotation_deg: int = 0,
         flipped_h: bool = False,
@@ -221,15 +225,31 @@ class SymbolLibrary:
             painter.drawLine(QPointF(20.0, 0.0), QPointF(40.0, 0.0))
 
         elif component_id == "dc_voltage":
-            # Circle (r = 15) with '+' on left (pos) and '-' on right (neg)
+            # Circle (r = 15) and leads
             painter.drawLine(QPointF(-40.0, 0.0), QPointF(-15.0, 0.0))
             painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
             painter.drawLine(QPointF(15.0, 0.0), QPointF(40.0, 0.0))
-            # '+' sign near left side inside circle
-            painter.drawLine(QPointF(-10.0, 0.0), QPointF(-4.0, 0.0))
-            painter.drawLine(QPointF(-7.0, -3.0), QPointF(-7.0, 3.0))
-            # '-' sign near right side inside circle
-            painter.drawLine(QPointF(4.0, 0.0), QPointF(10.0, 0.0))
+
+            marks = polarity_mark_positions(component_id, rotation_deg=rotation_deg, flipped_h=flipped_h)
+            px, py = marks["plus"]
+            mx, my = marks["minus"]
+
+            painter.save()
+            if rotation_deg:
+                painter.rotate(-float(rotation_deg))
+            if flipped_h:
+                painter.scale(-1.0, 1.0)
+
+            pen_pol = QPen(QColor(polarity_color or stroke_color), 2.0)
+            pen_pol.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen_pol)
+
+            # '+' sign centered at (px, py)
+            painter.drawLine(QPointF(px - 3.0, py), QPointF(px + 3.0, py))
+            painter.drawLine(QPointF(px, py - 3.0), QPointF(px, py + 3.0))
+            # '-' sign centered at (mx, my)
+            painter.drawLine(QPointF(mx - 3.0, my), QPointF(mx + 3.0, my))
+            painter.restore()
 
         elif component_id == "ac_voltage":
             # Circle (r = 15) with sine wave inside
@@ -242,13 +262,37 @@ class SymbolLibrary:
             painter.drawPath(sine)
 
         elif component_id == "dc_current":
-            # Circle (r = 15) with arrow pointing toward left ('pos') terminal
+            # Circle (r = 15) with arrow pointing toward 'pos' terminal
             painter.drawLine(QPointF(-40.0, 0.0), QPointF(-15.0, 0.0))
             painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
             painter.drawLine(QPointF(15.0, 0.0), QPointF(40.0, 0.0))
-            painter.drawLine(QPointF(9.0, 0.0), QPointF(-9.0, 0.0))
-            painter.drawLine(QPointF(-9.0, 0.0), QPointF(-3.0, -4.5))
-            painter.drawLine(QPointF(-9.0, 0.0), QPointF(-3.0, 4.5))
+
+            marks = polarity_mark_positions(component_id, rotation_deg=rotation_deg, flipped_h=flipped_h)
+            tx, ty = marks["arrow_tip"]
+            ax, ay = marks["arrow_tail"]
+
+            painter.save()
+            if rotation_deg:
+                painter.rotate(-float(rotation_deg))
+            if flipped_h:
+                painter.scale(-1.0, 1.0)
+
+            pen_pol = QPen(QColor(polarity_color or stroke_color), 2.0)
+            pen_pol.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen_pol)
+
+            painter.drawLine(QPointF(ax, ay), QPointF(tx, ty))
+            dx = tx - ax
+            dy = ty - ay
+            length = math.hypot(dx, dy)
+            if length > 0.0:
+                ux = dx / length
+                uy = dy / length
+                barb1 = QPointF(tx - 6.0 * ux - 4.5 * uy, ty - 6.0 * uy + 4.5 * ux)
+                barb2 = QPointF(tx - 6.0 * ux + 4.5 * uy, ty - 6.0 * uy - 4.5 * ux)
+                painter.drawLine(QPointF(tx, ty), barb1)
+                painter.drawLine(QPointF(tx, ty), barb2)
+            painter.restore()
 
         elif component_id == "ground":
             # Terminal at (0, -20), vertical stem to (0, 0), three horizontal earth bars
@@ -283,12 +327,12 @@ class SymbolLibrary:
             painter.drawLine(QPointF(-d, d), QPointF(d, -d))
 
         elif component_id in ("voltmeter", "ammeter"):
-            # Circle (r = 15) with geometric 'V' or 'A' drawn with paths (no text element)
+            # Circle (r = 15) and leads
             painter.drawLine(QPointF(-40.0, 0.0), QPointF(-15.0, 0.0))
             painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
             painter.drawLine(QPointF(15.0, 0.0), QPointF(40.0, 0.0))
 
-            # The letter ('V' or 'A') must stay upright regardless of rotation or flip
+            # The letter ('V' or 'A') and '+' polarity mark drawn upright
             painter.save()
             if rotation_deg:
                 painter.rotate(-float(rotation_deg))
@@ -302,6 +346,16 @@ class SymbolLibrary:
                 painter.drawLine(QPointF(-5.0, 6.0), QPointF(0.0, -6.0))
                 painter.drawLine(QPointF(0.0, -6.0), QPointF(5.0, 6.0))
                 painter.drawLine(QPointF(-3.2, 1.5), QPointF(3.2, 1.5))
+
+            marks = polarity_mark_positions(component_id, rotation_deg=rotation_deg, flipped_h=flipped_h)
+            if "plus" in marks:
+                px, py = marks["plus"]
+                pen_pol = QPen(QColor(polarity_color or stroke_color), 1.8)
+                pen_pol.setCapStyle(Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen_pol)
+                painter.drawLine(QPointF(px - 2.5, py), QPointF(px + 2.5, py))
+                painter.drawLine(QPointF(px, py - 2.5), QPointF(px, py + 2.5))
+
             painter.restore()
 
         else:

@@ -174,6 +174,71 @@ def transform_terminal_position(
     return snap_to_grid(tx, ty, grid_px=grid_px)
 
 
+def polarity_mark_positions(
+    part_type: str,
+    rotation_deg: int = 0,
+    flipped_h: bool = False,
+    center_px: tuple[float, float] = (0.0, 0.0),
+) -> dict[str, tuple[float, float]]:
+    """Compute exact pixel positions of symbol polarity marks (+, -, arrows) in upright coordinates.
+
+    Uses the exact same transformed terminal positions as the netlist extraction engine
+    (`transform_terminal_position`), ensuring visual drawing and electrical connectivity
+    share a single unified source of geometric truth without Qt imports.
+    """
+    if part_type not in ("dc_voltage", "dc_current", "voltmeter", "ammeter"):
+        return {}
+
+    # Terminal coordinates from the unified transform function
+    pos_t = transform_terminal_position(
+        (-2.0, 0.0), center_px, rotation_deg=rotation_deg, flipped_h=flipped_h
+    )
+    neg_t = transform_terminal_position(
+        (2.0, 0.0), center_px, rotation_deg=rotation_deg, flipped_h=flipped_h
+    )
+
+    # Direction vector from center towards positive terminal
+    dx = pos_t[0] - center_px[0]
+    dy = pos_t[1] - center_px[1]
+    ux = dx / 40.0
+    uy = dy / 40.0
+    # Perpendicular unit vector (rotated 90 deg CCW)
+    perp_x = -uy
+    perp_y = ux
+
+    marks: dict[str, tuple[float, float]] = {
+        "pos_terminal": pos_t,
+        "neg_terminal": neg_t,
+    }
+
+    if part_type == "dc_voltage":
+        marks["plus"] = (
+            round(center_px[0] + 7.0 * ux, 3),
+            round(center_px[1] + 7.0 * uy, 3),
+        )
+        marks["minus"] = (
+            round(center_px[0] - 7.0 * ux, 3),
+            round(center_px[1] - 7.0 * uy, 3),
+        )
+    elif part_type == "dc_current":
+        marks["arrow_tip"] = (
+            round(center_px[0] + 9.0 * ux, 3),
+            round(center_px[1] + 9.0 * uy, 3),
+        )
+        marks["arrow_tail"] = (
+            round(center_px[0] - 9.0 * ux, 3),
+            round(center_px[1] - 9.0 * uy, 3),
+        )
+        marks["plus"] = marks["arrow_tip"]
+    elif part_type in ("voltmeter", "ammeter"):
+        marks["plus"] = (
+            round(center_px[0] + 22.0 * ux + 7.0 * perp_x, 3),
+            round(center_px[1] + 22.0 * uy + 7.0 * perp_y, 3),
+        )
+
+    return marks
+
+
 def parse_symbol_metadata_dict(
     data: dict[str, object],
     *,
