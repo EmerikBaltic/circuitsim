@@ -621,6 +621,83 @@ def find_wires_attached_to_components(
     return attached_ids
 
 
+def _route_cuts_box(pts: Sequence[PointPx], box: tuple[int, int, int, int]) -> bool:
+    """Return True if any orthogonal segment in `pts` passes through the interior of `box`."""
+    min_x, min_y, max_x, max_y = box
+    for i in range(len(pts) - 1):
+        x1, y1 = pts[i]
+        x2, y2 = pts[i + 1]
+        if y1 == y2:
+            if min_y < y1 < max_y:
+                seg_min_x, seg_max_x = min(x1, x2), max(x1, x2)
+                if max(seg_min_x, min_x) < min(seg_max_x, max_x):
+                    return True
+        elif x1 == x2:
+            if min_x < x1 < max_x:
+                seg_min_y, seg_max_y = min(y1, y2), max(y1, y2)
+                if max(seg_min_y, min_y) < min(seg_max_y, max_y):
+                    return True
+    return False
+
+
+def _route_wire_avoiding_body(
+    p_start: PointPx,
+    p_end: PointPx,
+    *,
+    cname: str,
+    tname: str,
+    new_terminals: dict[str, dict[str, PointPx]],
+    prefer_horizontal_first: bool = True,
+    terminal_at_start: bool = True,
+) -> tuple[PointPx, ...]:
+    """Route an orthogonal wire between `p_start` and `p_end` without cutting through `cname`'s body."""
+    terms = new_terminals.get(cname, {})
+    if len(terms) >= 2:
+        t_vals = list(terms.values())
+        cx = (t_vals[0][0] + t_vals[1][0]) // 2
+        cy = (t_vals[0][1] + t_vals[1][1]) // 2
+        is_horiz = (t_vals[0][1] == t_vals[1][1])
+        if is_horiz:
+            body_box = (cx - 39, cy - 19, cx + 39, cy + 19)
+        else:
+            body_box = (cx - 19, cy - 39, cx + 19, cy + 39)
+        t_sorted = sorted(terms.keys())
+        side_factor = -1 if (tname in t_sorted and t_sorted.index(tname) == 0) else 1
+    elif len(terms) == 1:
+        gpt = list(terms.values())[0]
+        cx, cy = gpt[0], gpt[1] + 20
+        body_box = (cx - 15, cy - 15, cx + 15, cy + 15)
+        is_horiz = True
+        side_factor = 1
+    else:
+        return route_orthogonal_wire(p_start, p_end, prefer_horizontal_first=prefer_horizontal_first)
+
+    # 1. Try simple 2-segment routes (preferring the requested direction first)
+    cands = [
+        route_orthogonal_wire(p_start, p_end, prefer_horizontal_first=prefer_horizontal_first),
+        route_orthogonal_wire(p_start, p_end, prefer_horizontal_first=not prefer_horizontal_first),
+    ]
+    for cand in cands:
+        if cand and not _route_cuts_box(cand, body_box):
+            return cand
+
+    # 2. If simple routes cut through the body (e.g. 180° rotation / opposite-side connection),
+    # construct an orthogonal bypass detour around the component body
+    term_pt = p_start if terminal_at_start else p_end
+    other_pt = p_end if terminal_at_start else p_start
+
+    if is_horiz:
+        bypass_y = cy + side_factor * 40
+        route = (term_pt, (term_pt[0], bypass_y), (other_pt[0], bypass_y), other_pt)
+    else:
+        bypass_x = cx + side_factor * 40
+        route = (term_pt, (bypass_x, term_pt[1]), (bypass_x, other_pt[1]), other_pt)
+
+    if not terminal_at_start:
+        route = tuple(reversed(route))
+    return simplify_orthogonal_points(route, snap=False)
+
+
 def reroute_wires_for_updated_terminals(
     old_terminals: dict[str, dict[str, PointPx]],
     new_terminals: dict[str, dict[str, PointPx]],
@@ -646,12 +723,16 @@ def reroute_wires_for_updated_terminals(
         new_start = start_pt
         new_end = end_pt
 
+        start_cname, start_tname = None, None
+        end_cname, end_tname = None, None
+
         if start_pt in old_pt_to_term:
             cname, tname = old_pt_to_term[start_pt]
             if cname in new_terminals and tname in new_terminals[cname]:
                 new_start = normalize_point_px(
                     new_terminals[cname][tname], snap=True
                 )
+                start_cname, start_tname = cname, tname
 
         if end_pt in old_pt_to_term:
             cname, tname = old_pt_to_term[end_pt]
@@ -659,6 +740,7 @@ def reroute_wires_for_updated_terminals(
                 new_end = normalize_point_px(
                     new_terminals[cname][tname], snap=True
                 )
+                end_cname, end_tname = cname, tname
 
         if new_start != start_pt or new_end != end_pt:
             dx_s = new_start[0] - start_pt[0]
@@ -671,8 +753,29 @@ def reroute_wires_for_updated_terminals(
                 )
             else:
                 horiz_first = infer_horizontal_first(pts)
-                updated[w.wire_id] = route_orthogonal_wire(
-                    new_start, new_end, prefer_horizontal_first=horiz_first
-                )
+                if start_cname is not None:
+                    updated[w.wire_id] = _route_wire_avoiding_body(
+                        new_start,
+                        new_end,
+                        cname=start_cname,
+                        tname=start_tname,
+                        new_terminals=new_terminals,
+                        prefer_horizontal_first=horiz_first,
+                        terminal_at_start=True,
+                    )
+                elif end_cname is not None:
+                    updated[w.wire_id] = _route_wire_avoiding_body(
+                        new_start,
+                        new_end,
+                        cname=end_cname,
+                        tname=end_tname,
+                        new_terminals=new_terminals,
+                        prefer_horizontal_first=horiz_first,
+                        terminal_at_start=False,
+                    )
+                else:
+                    updated[w.wire_id] = route_orthogonal_wire(
+                        new_start, new_end, prefer_horizontal_first=horiz_first
+                    )
 
     return updated
