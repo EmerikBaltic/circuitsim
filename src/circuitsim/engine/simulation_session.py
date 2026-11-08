@@ -439,12 +439,23 @@ class SimulationSession:
 
         diags: list[ProblemDiagnostic] = []
         for w in self._latched_warnings.values():
+            w_wire_ids: list[str] = []
+            if self._connectivity is not None and w.code == "ammeter_in_parallel":
+                comp_nodes: set[str] = set()
+                for cname in w.component_names:
+                    for c in self.circuit.components:
+                        if c.name == cname:
+                            comp_nodes.update(c.nodes)
+                for wid, wnode in self._connectivity.wire_to_node.items():
+                    if wnode in comp_nodes:
+                        w_wire_ids.append(wid)
             diags.append(
                 ProblemDiagnostic(
                     code=w.code,
                     severity="warning",
                     message=w.message,
                     component_names=w.component_names,
+                    wire_ids=tuple(w_wire_ids),
                 )
             )
 

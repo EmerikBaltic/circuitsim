@@ -236,6 +236,14 @@ class ComponentItem(QGraphicsObject):
         self.setToolTip(message if message else f"{self.component.name} ({self.metadata.display_name})")
         self.update()
 
+    def effective_highlight_color(self) -> str | None:
+        """Return the active problem-highlight hex color ('#FF5252' for error, '#FFA726' for warning), or None."""
+        if self.diagnostic_severity == "error":
+            return "#FF5252"
+        if self.diagnostic_severity == "warning":
+            return "#FFA726"
+        return None
+
     def apply_telemetry(self, telemetry: ComponentTelemetry) -> None:
         """Update live operating state from a `SimulationFrame` telemetry snapshot."""
         self.component.voltage = telemetry.voltage

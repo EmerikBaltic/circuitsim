@@ -96,6 +96,14 @@ class WireItem(QGraphicsObject):
         self.setToolTip(message)
         self.update()
 
+    def effective_highlight_color(self) -> str | None:
+        """Return the active problem-highlight hex color ('#FF5252' for error, '#FFA726' for warning), or None."""
+        if self.diagnostic_severity == "error":
+            return "#FF5252"
+        if self.diagnostic_severity == "warning":
+            return "#FFA726"
+        return None
+
     def to_wire_spec(self) -> WireSpec:
         """Convert to a pure-Python `WireSpec` for connectivity extraction."""
         return WireSpec(wire_id=self.wire_id, points=self._points)

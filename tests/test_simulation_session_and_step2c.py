@@ -138,17 +138,8 @@ def test_meters_show_dash_before_simulation_and_after_stop() -> None:
     assert stop_frame.components["A1"].display_value == "-- A"
 
 
-def test_schematic_12v_1k_voltmeter_ammeter_switch_and_live_resistor_edit() -> None:
-    """Addition #6 (analytic test, independent of code):
-    - 12 V source with 1 kOhm resistor and voltmeter across it reads 12 V
-    - Ammeter in series reads 12 mA
-    - Toggling a switch changes the readings (0 V / 0 A when open, 12 V / 12 mA when closed)
-    - Changing resistor value live changes the result as Ohm's law I = V / R predicts.
-    """
-    # Build via schematic placement + wire extraction (end-to-end headless test):
-    # Under 90° CW rotation, local terminal (-2, 0) maps to (cx, cy - 40)
-    # and local terminal (+2, 0) maps to (cx, cy + 40).
-    # In dc_voltage.json, pos is at [-2, 0] -> (0, -40) and neg is at [2, 0] -> (0, 40).
+def _build_12v_1k_switch_meters_session() -> SimulationSession:
+    """Helper to construct the 12 V / 1 kOhm / Switch / Ammeter / Voltmeter schematic session."""
     placed = [
         PlacedComponentSpec(
             DCVoltageSource("V1", "a", "b", voltage=12.0),
@@ -186,47 +177,66 @@ def test_schematic_12v_1k_voltmeter_ammeter_switch_and_live_resistor_edit() -> N
         WireSpec("w_bot_1", ((0, 40), (220, 40))),
         WireSpec("w_bot_vm", ((220, 40), (300, 40))),
     ]
+    return SimulationSession.from_schematic(placed, wires)
 
-    session = SimulationSession.from_schematic(placed, wires)
 
-    # Before simulation starts, meters must read "-- V" and "-- A"
+def test_6a_voltmeter_across_1k_resistor_reads_12v() -> None:
+    """Item 6a (1/5): Voltmeter across 1 kOhm resistor with 12 V source reads 12 V."""
+    session = _build_12v_1k_switch_meters_session()
     assert session.get_meter_reading_str("VM1") == "-- V"
-    assert session.get_meter_reading_str("A1") == "-- A"
 
-    # Start simulation
     frame = session.start()
     assert frame.state == SimulationState.RUNNING
     assert frame.diagnostics == ()
 
-    # Analytic Ohm's law check: V = 12 V, R_load = 1000 Ohm || 10 MOhm, R_series = 1 mOhm + 1 mOhm
-    v_ideal = 12.0
     r_load_1k = (1000.0 * 1e7) / (1000.0 + 1e7)
     r_total_1k = r_load_1k + 0.001 + 0.001
-    i_analytic_1k = v_ideal / r_total_1k
-    v_resistor_1k = i_analytic_1k * r_load_1k
-
+    v_resistor_1k = (12.0 / r_total_1k) * r_load_1k
     assert session.get_meter_reading_value("VM1") == pytest.approx(v_resistor_1k, rel=1e-6)
-    assert session.get_meter_reading_value("A1") == pytest.approx(i_analytic_1k, rel=1e-6)
     assert session.get_meter_reading_str("VM1") == "12 V"
+
+
+def test_6a_series_ammeter_with_12v_1k_reads_12ma() -> None:
+    """Item 6a (2/5): Series ammeter with 12 V source and 1 kOhm resistor reads 12 mA."""
+    session = _build_12v_1k_switch_meters_session()
+    assert session.get_meter_reading_str("A1") == "-- A"
+
+    session.start()
+    r_load_1k = (1000.0 * 1e7) / (1000.0 + 1e7)
+    r_total_1k = r_load_1k + 0.001 + 0.001
+    i_analytic_1k = 12.0 / r_total_1k
+    assert session.get_meter_reading_value("A1") == pytest.approx(i_analytic_1k, rel=1e-6)
     assert session.get_meter_reading_str("A1") == "12 mA"
 
-    # Toggle switch OPEN while running -> current and resistor voltage drop to ~0
+
+def test_6a_toggling_switch_changes_meter_readings() -> None:
+    """Item 6a (3/5): Toggling a switch changes voltmeter and ammeter readings as expected."""
+    session = _build_12v_1k_switch_meters_session()
+    session.start()
+
+    r_load_1k = (1000.0 * 1e7) / (1000.0 + 1e7)
+    r_total_1k = r_load_1k + 0.002
+    i_analytic_1k = 12.0 / r_total_1k
+    v_resistor_1k = i_analytic_1k * r_load_1k
+
     frame_open = session.toggle_switch("SW1")
     assert frame_open.components["SW1"].switch_closed is False
     assert frame_open.components["SW1"].display_value == "OFF"
-    # With 1 GOhm open switch, I = 12 V / 1e9 Ohm = 12 nA, V_R = 12 uV
     assert abs(session.get_meter_reading_value("A1") or 0.0) < 1e-7
     assert abs(session.get_meter_reading_value("VM1") or 0.0) < 1e-4
 
-    # Toggle switch CLOSED again -> restores 12 V and 12 mA
     frame_closed = session.toggle_switch("SW1")
     assert frame_closed.components["SW1"].switch_closed is True
     assert frame_closed.components["SW1"].display_value == "ON"
     assert session.get_meter_reading_value("VM1") == pytest.approx(v_resistor_1k, rel=1e-6)
     assert session.get_meter_reading_value("A1") == pytest.approx(i_analytic_1k, rel=1e-6)
 
-    # Live parameter edit while running: change R1 from 1 kOhm to "500" (500 Ohm)
-    # Analytic Ohm's law: I = 12 V / (500 Ohm || 10 MOhm + 2 mOhm) = 24 mA
+
+def test_6a_live_resistor_change_to_500_ohm_gives_24ma() -> None:
+    """Item 6a (4/5): Changing R1 live from 1 kOhm to 500 Ohm updates current to 24 mA."""
+    session = _build_12v_1k_switch_meters_session()
+    session.start()
+
     frame_500 = session.update_component_parameter("R1", "resistance", "500")
     assert frame_500.components["R1"].display_value == "500 Ω"
     r_load_500 = (500.0 * 1e7) / (500.0 + 1e7)
@@ -235,7 +245,14 @@ def test_schematic_12v_1k_voltmeter_ammeter_switch_and_live_resistor_edit() -> N
     assert session.get_meter_reading_str("A1") == "24 mA"
     assert session.get_meter_reading_str("VM1") == "12 V"
 
-    # Also change DC source voltage live to "6" V -> I = 6 V / 500 Ohm = 12 mA
+
+def test_6a_live_source_change_to_6v_gives_12ma() -> None:
+    """Item 6a (5/5): Changing V1 live to 6 V (with R1 = 500 Ohm) gives 12 mA and 6 V."""
+    session = _build_12v_1k_switch_meters_session()
+    session.start()
+    session.update_component_parameter("R1", "resistance", "500")
+
+    r_load_500 = (500.0 * 1e7) / (500.0 + 1e7)
     frame_6v = session.update_component_parameter("V1", "dc_voltage", "6")
     assert frame_6v.components["V1"].display_value == "6 V"
     assert session.get_meter_reading_value("VM1") == pytest.approx(6.0, rel=1e-5)
@@ -616,4 +633,297 @@ win.close()
         text=True,
         check=False,
     )
+    print(res.stdout.strip())
+    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_6b_value_edit_undo_and_redo_while_stopped_and_running() -> None:
+    """Item 6b: Editing a resistor value and pressing Ctrl+Z restores the old value in
+    the component model, the canvas label, and the live simulation result; Ctrl+Y reapplies
+    it. Tested both while stopped and while running.
+    """
+    script = """
+import sys
+from PySide6.QtCore import QEventLoop, QPointF, QTimer
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.canvas.component_item import format_component_value_summary
+
+app = QApplication(sys.argv)
+win = MainWindow()
+scene = win.circuit_scene
+
+v1 = scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)   # pos (0,-40), neg (0,40)
+a1 = scene.place_new_component("ammeter", QPointF(80, -40))                    # pos (40,-40), neg (120,-40)
+r1 = scene.place_new_component("resistor", QPointF(160, 0), rotation_deg=90)   # a (160,-40), b (160,40)
+gnd = scene.place_new_component("ground", QPointF(0, 60))                      # gnd (0,40)
+
+scene.add_wire([(0, -40), (40, -40)])
+scene.add_wire([(120, -40), (160, -40)])
+scene.add_wire([(0, 40), (160, 40)])
+
+def wait_ms(ms: int) -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+# 1. Test value edit + Undo (Ctrl+Z) + Redo (Ctrl+Y) while STOPPED
+assert r1.component.resistance == 1000.0
+assert format_component_value_summary(r1.component) == "1 kΩ"
+
+assert scene.edit_component_parameters(r1, {"resistance": "2k"}) is True
+assert r1.component.resistance == 2000.0
+assert format_component_value_summary(r1.component) == "2 kΩ"
+
+scene.undo_stack.undo()
+assert r1.component.resistance == 1000.0
+assert format_component_value_summary(r1.component) == "1 kΩ"
+
+scene.undo_stack.redo()
+assert r1.component.resistance == 2000.0
+assert format_component_value_summary(r1.component) == "2 kΩ"
+
+# Undo back to 1 kOhm before starting simulation
+scene.undo_stack.undo()
+assert r1.component.resistance == 1000.0
+
+# 2. Test value edit + Undo (Ctrl+Z) + Redo (Ctrl+Y) while RUNNING
+win.start_simulation()
+wait_ms(80)
+assert a1.live_display_value == "12 mA", f"Expected 12 mA initially, got {a1.live_display_value!r}"
+assert r1.live_display_value == "1 kΩ"
+
+# Edit R1 from 1 kOhm to 500 Ohm while running -> current becomes 24 mA
+assert scene.edit_component_parameters(r1, {"resistance": "500"}) is True
+wait_ms(80)
+assert r1.component.resistance == 500.0
+assert r1.live_display_value == "500 Ω"
+assert a1.live_display_value == "24 mA", f"Expected 24 mA after live edit, got {a1.live_display_value!r}"
+
+# Undo (Ctrl+Z) while running -> restores 1 kOhm and 12 mA live
+scene.undo_stack.undo()
+wait_ms(80)
+assert r1.component.resistance == 1000.0
+assert r1.live_display_value == "1 kΩ"
+assert a1.live_display_value == "12 mA", f"Expected 12 mA after Undo while running, got {a1.live_display_value!r}"
+
+# Redo (Ctrl+Y) while running -> reapplies 500 Ohm and 24 mA live
+scene.undo_stack.redo()
+wait_ms(80)
+assert r1.component.resistance == 500.0
+assert r1.live_display_value == "500 Ω"
+assert a1.live_display_value == "24 mA", f"Expected 24 mA after Redo while running, got {a1.live_display_value!r}"
+
+win.close()
+"""
+    res = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    print(res.stdout.strip())
+    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_6c_close_main_window_while_running_stops_worker_thread_cleanly() -> None:
+    """Item 6c: Closing MainWindow while a simulation is running stops the QThread cleanly."""
+    script = """
+import sys
+from PySide6.QtCore import QEventLoop, QPointF, QTimer
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication(sys.argv)
+win = MainWindow()
+win.show()
+scene = win.circuit_scene
+
+scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
+scene.place_new_component("ground", QPointF(0, 60))
+scene.add_wire([(0, -40), (100, -40)])
+scene.add_wire([(0, 40), (100, 40)])
+
+win.start_simulation()
+loop = QEventLoop()
+QTimer.singleShot(80, loop.quit)
+loop.exec()
+
+assert win.sim_controller._thread.isRunning() is True, "Worker QThread should be running during simulation"
+win.close()
+app.processEvents()
+assert win.sim_controller._thread.isRunning() is False, "Worker QThread must stop cleanly when MainWindow closes"
+"""
+    res = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    print(res.stdout.strip())
+    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_6d_canvas_item_and_wire_highlight_colors_and_status_bar_text() -> None:
+    """Item 6d: Real canvas item and wire colour state:
+    - 'no_ground' highlights items and wires in red ('#FF5252'),
+    - 'ammeter_in_parallel' highlights in amber ('#FFA726'),
+    - fixing the circuit clears the highlight (None),
+    - and status_warnings.text() matches the diagnostic.
+    """
+    script = """
+import sys
+from PySide6.QtCore import QEventLoop, QPointF, QTimer
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication(sys.argv)
+win = MainWindow()
+scene = win.circuit_scene
+
+def wait_ms(ms: int) -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+# 1. 'no_ground' -> red highlight ('#FF5252') on components and wires
+v1 = scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+r1 = scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
+w_top = scene.add_wire([(0, -40), (100, -40)])
+w_bot = scene.add_wire([(0, 40), (100, 40)])
+
+win.start_simulation()
+wait_ms(80)
+
+assert v1.effective_highlight_color() == "#FF5252"
+assert r1.effective_highlight_color() == "#FF5252"
+assert w_top.effective_highlight_color() == "#FF5252"
+assert w_bot.effective_highlight_color() == "#FF5252"
+assert "No ground connected" in win.status_warnings.text()
+
+# 2. Add Ground + Ammeter in parallel with V1 -> amber highlight ('#FFA726') on ammeter and wires
+gnd = scene.place_new_component("ground", QPointF(0, 60))
+a1 = scene.place_new_component("ammeter", QPointF(200, 0), rotation_deg=90)
+w_am_top = scene.add_wire([(100, -40), (200, -40)])
+w_am_bot = scene.add_wire([(100, 40), (200, 40)])
+
+win.start_simulation()
+wait_ms(80)
+
+assert a1.effective_highlight_color() == "#FFA726"
+assert w_am_top.effective_highlight_color() == "#FFA726"
+assert w_am_bot.effective_highlight_color() == "#FFA726"
+assert "Ammeter A1" in win.status_warnings.text()
+
+# 3. Fix circuit by deleting the parallel ammeter -> highlights clear to None and status_warnings == 'Simulation Running (OK)'
+scene.clearSelection()
+a1.setSelected(True)
+scene.delete_selected()
+wait_ms(80)
+
+assert v1.effective_highlight_color() is None
+assert r1.effective_highlight_color() is None
+assert w_top.effective_highlight_color() is None
+assert w_bot.effective_highlight_color() is None
+assert win.status_warnings.text() == "Simulation Running (OK)"
+
+win.close()
+"""
+    res = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    print(res.stdout.strip())
+    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_6e_ui_responsiveness_on_30_resistor_ladder_plus_rc_load() -> None:
+    """Item 6e: Run the UI-responsiveness benchmark on a 30-resistor ladder plus an RC load.
+    Reads max-gap threshold from CIRCUITSIM_MAX_UI_GAP_MS (default 180.0 ms).
+    """
+    script = """
+import os
+import sys
+import time
+from PySide6.QtCore import QEventLoop, QPointF, QTimer
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication(sys.argv)
+win = MainWindow()
+scene = win.circuit_scene
+
+# Build an AC source + 15-stage (30-resistor) ladder + RC load
+# Stage k (k = 0..14):
+# - series resistor from x = k*80 to x = (k+1)*80 along y = -40 (center at (k*80 + 40, -40))
+# - shunt resistor at x = (k+1)*80 from y = -40 to y = 40 (center at ((k+1)*80, 0), rot=90)
+scene.place_new_component("ac_voltage", QPointF(0, 0), rotation_deg=90)  # (0, -40) to (0, 40)
+scene.place_new_component("ground", QPointF(0, 60))                      # (0, 40)
+
+for k in range(15):
+    x_left = k * 80
+    x_right = (k + 1) * 80
+    # Series resistor (80 px wide, terminals at x_left+0 and x_right+0 when centered at x_left+40)
+    scene.place_new_component("resistor", QPointF(x_left + 40, -40), rotation_deg=0)
+    # Shunt resistor (80 px tall, terminals at (x_right, -40) and (x_right, 40))
+    scene.place_new_component("resistor", QPointF(x_right, 0), rotation_deg=90)
+    # Bottom return wire segment
+    scene.add_wire([(x_left, 40), (x_right, 40)])
+
+# Add RC load at the end of the 30-resistor ladder (x = 1200 to x = 1280)
+scene.place_new_component("resistor", QPointF(1240, -40), rotation_deg=0)
+scene.place_new_component("capacitor", QPointF(1280, 0), rotation_deg=90)
+scene.add_wire([(1200, 40), (1280, 40)])
+
+threshold_ms = float(os.environ.get("CIRCUITSIM_MAX_UI_GAP_MS", "180.0"))
+ui_heartbeats = 0
+max_gap_ms = 0.0
+gaps = []
+last_tick = time.perf_counter()
+
+def on_heartbeat():
+    global ui_heartbeats, max_gap_ms, last_tick
+    now = time.perf_counter()
+    gap_ms = (now - last_tick) * 1000.0
+    if ui_heartbeats > 0:
+        gaps.append(gap_ms)
+        if gap_ms > max_gap_ms:
+            max_gap_ms = gap_ms
+    last_tick = now
+    ui_heartbeats += 1
+
+heartbeat_timer = QTimer()
+heartbeat_timer.setInterval(10)
+heartbeat_timer.timeout.connect(on_heartbeat)
+heartbeat_timer.start()
+
+win.start_simulation()
+loop = QEventLoop()
+QTimer.singleShot(300, loop.quit)
+loop.exec()
+heartbeat_timer.stop()
+
+avg_gap_ms = sum(gaps) / len(gaps) if gaps else 0.0
+print(f"BENCHMARK_6E: heartbeats={ui_heartbeats}, avg_gap_ms={avg_gap_ms:.2f}, max_gap_ms={max_gap_ms:.2f}, threshold_ms={threshold_ms:.1f}")
+
+assert win._sim_state.value == "running", f"Expected running state, got {win._sim_state}"
+assert ui_heartbeats >= 12, f"Expected >= 12 UI heartbeats during 300 ms ladder run, got {ui_heartbeats}"
+assert max_gap_ms < threshold_ms, f"Main UI thread stalled for {max_gap_ms:.2f} ms (threshold {threshold_ms:.1f} ms)"
+
+win.close()
+"""
+    res = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    print(res.stdout.strip())
     assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
