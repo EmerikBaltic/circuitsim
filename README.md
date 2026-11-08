@@ -6,15 +6,40 @@ It is designed for electrical engineering students and hobbyists who want both a
 
 ---
 
-## Current Project Status
+## Current Project Status: Milestone 2 Complete
 
 - **Milestone 1 (Simulation Engine — Complete)**:
   - Pure-Python/NumPy/SciPy **Modified Nodal Analysis (MNA)** solver with cached LU factorization (`scipy.linalg.lu_factor` / `lu_solve`), strictly decoupled from Qt.
   - **DC Operating Point** and **Transient Analysis** using **Trapezoidal integration** (second-order accurate, lossless on undamped $LC$ tanks) with automatic **Backward Euler** startup and switch-event damping to eliminate numerical ringing.
   - **Components**: Resistor, Capacitor (with initial voltage & ESR), Inductor (with winding resistance DCR, reactance $X_L = 2\pi f L$, and automatic Thévenin time constant $\tau = L / (R_{\text{th}} + \text{DCR})$), DC Voltage & Current Sources, AC Voltage Source (sine, square, triangle, sawtooth, pulse, DC offset), SPST Switch ($1\text{ m}\Omega$ ON, $1\text{ G}\Omega$ OFF, timed switching, $10\text{ pF}$ contact capacitance, and $350\text{ V}$ contact breakdown arc model), Incandescent Lightbulb ($R_{\text{hot}} = V^2/P$ and optional thermal filament inrush model), and polarity-aware Voltmeter ($10\text{ M}\Omega$) & Ammeter ($1\text{ m}\Omega$) with DC, AC RMS, Peak, and Instantaneous modes.
   - **Topological Diagnostics**: Plain-language detection of missing ground, floating/dangling nodes, ideal voltage-source loops, ammeters connected in parallel across voltage sources, and inductive kickback warnings.
-  - **56 analytical unit tests** passing (`pytest`).
-- **Milestone 2 (Main Window & Interactive Schematic Canvas — Up Next)**
+- **Milestone 2 (Main Window, Interactive Schematic Canvas & Live Simulation — Complete)**:
+  - Dockable **PySide6 (Qt 6)** Main Window with Dark & Light themes (`Ctrl+T`), searchable Component Palette, and IEC 60617 symbol library (hybrid custom SVG + procedural renderer).
+  - Grid-snapped ($20\text{ px}$) schematic canvas with right-angle wire routing, Union-Find netlist extraction (`CircuitScene.build_circuit()`), explicit junction dots (`J`), attached wire re-routing on move/rotate/flip, and full `QUndoStack` Undo/Redo (`Ctrl+Z` / `Ctrl+Y`).
+  - Background `QThread` simulation worker (`SimulationWorkerController` + pure-Python `SimulationSession`) with live auto-ranged Voltmeter/Ammeter readouts, animated clickable Switch, real-power Lightbulb glow, double-click live value editing (supporting both dot and single-comma decimals like `5,65 G`), and red/amber canvas problem highlighting.
+  - **95 automated unit and UI tests** passing (`pytest`).
+- **Milestone 3 (Save/Load `.circ`, 10-Slot Saved Parts Bar & Full Properties Dialog — Up Next)**
+
+---
+
+## How to Use
+
+1. **Place Parts**: Click or drag a part from the left **Component Palette** onto the schematic canvas (or double-click a palette item to place it at the center). Always include a **Ground** part wired to your circuit.
+2. **Rotate & Flip**: Select one or more parts and press **`R`** to rotate $90^\circ$ clockwise or **`F`** to flip horizontally. Labels and values stay upright and readable at any angle.
+3. **Draw Wires**: Click directly on any component terminal dot to start a right-angle wire, or press **`W`** to enter Wire Mode (`Esc` returns to Select Mode). Crossing wires do *not* connect unless they form a T-junction or you place a **Junction Dot** (**`J`**).
+4. **Edit Component Values**: **Double-click** any component on the canvas to open its value editor. Type values using engineering prefixes (`4.7k`, `5,65 G`, `100n`, `10K`)—a live preview (`= 4.7 kΩ`) appears below the input, and changes apply immediately even while the simulation is running (and can be undone with **`Ctrl+Z`**).
+5. **Run / Pause / Stop**: Use the top toolbar or keyboard shortcuts—**Run (`F5`)**, **Pause / Resume (`F6` or `Space`)**, and **Stop (`F7`)**—and choose simulation speed (`1x Real-Time`, `0.1x Slow`, `10x Fast`).
+6. **Toggle Switches Live**: Click directly on any **Switch** on the canvas while running to animate its lever open/closed and watch meter readings and lightbulb brightness respond in real time.
+
+---
+
+## Screenshots
+
+> *Placeholder — drop screenshots of the schematic canvas, live simulation, and theme views into `docs/screenshots/` and link them here:*
+>
+> - `[Screenshot: Dark Theme Schematic & Live Meters]`
+> - `[Screenshot: Lightbulb Glow & Double-Click Value Editor]`
+> - `[Screenshot: Light Theme & Canvas Problem Highlighting]`
 
 ---
 
@@ -54,8 +79,8 @@ python -m venv .venv
 | Milestone | Scope | Status |
 |-----------|-------|--------|
 | **Milestone 1** | Core MNA DC & Transient Engine, R/L/C, Sources, Switch, Bulb, Meters, Parser, Analytical Tests | **Done** |
-| **Milestone 2** | Dockable Main Window, Component Palette, Interactive IEC Schematic Canvas, Worker Thread, Live Meters/Switch/Bulb | **Next** |
-| **Milestone 3** | Double-Click Live Properties Dialog, Inductor $X_L / \tau$ Calculator, 10-Slot Saved Parts Bar, `.circ` JSON Save/Load | Planned |
+| **Milestone 2** | Dockable Main Window, Component Palette, Interactive IEC Schematic Canvas, Worker Thread, Live Meters/Switch/Bulb | **Done** |
+| **Milestone 3** | Double-Click Live Properties Dialog, Inductor $X_L / \tau$ Calculator, 10-Slot Saved Parts Bar, `.circ` JSON Save/Load | **Next** |
 | **Milestone 4** | 4-Channel Oscilloscope (Probes, Trigger, Cursors, Automatic Measurements, X-Y Mode, Math & FFT, PNG/CSV Export) | Planned |
 | **Milestone 5** | Semiconductors (Diode, Zener, LED, BJT, MOSFET, Op-Amp via Newton-Raphson), Current Animation, Themes, SPICE Import/Export, Packaging | Planned |
 

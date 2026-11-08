@@ -1,6 +1,6 @@
 # Suggestions & Ideas — CircuitSim
 
-Below are improvement ideas identified during **Milestone 1**. None of these will be implemented without your explicit approval.
+Below are improvement ideas identified during **Milestones 1 & 2**. None of these will be implemented without your explicit approval.
 
 1. **Symbol Style Setting (IEC / ANSI)** *(Effort: Small)*
    - *Reason*: Since schematic symbols are stored under `src/circuitsim/resources/symbols/iec/`, adding a parallel `ansi/` folder (zigzag resistor, curved capacitor, etc.) and a Preferences toggle lets students switch between European (IEC 60617) and North American (ANSI/IEEE) schematic conventions at any time.
@@ -12,3 +12,9 @@ Below are improvement ideas identified during **Milestone 1**. None of these wil
    - *Reason*: Scaling rows and columns of the MNA matrix before `lu_factor` reduces the condition number when $1\text{ m}\Omega$ ammeters/switches ($10^3\text{ S}$) coexist with $1\text{ G}\Omega$ open switches ($10^{-9}\text{ S}$) and `GMIN` ($10^{-12}\text{ S}$), improving numerical headroom on larger circuits.
 5. **Optional 0 V Branch-Current Mode for Ideal Ammeters** *(Effort: Small)*
    - *Reason*: Allowing the user to select `"Ideal (0 Ω)"` in the ammeter properties dialog (stamping it like a $0\text{ V}$ voltage source) eliminates the $10^3\text{ S}$ conductance entry from $\mathbf{G}$ and removes all voltage burden on low-impedance circuits.
+6. **GitHub Actions CI Running `pytest` on Every Push + README Status Badge** *(Effort: Small)*
+   - *Reason*: Adding a `.github/workflows/ci.yml` workflow that runs `pytest` on every push and pull request (setting `QT_QPA_PLATFORM=offscreen` for the headless Qt subprocess tests) and displaying a green status badge in `README.md` gives immediate confidence that every commit passes on a clean machine.
+7. **Number-Format / Locale Display Setting (Dot vs. Comma Decimal)** *(Effort: Small)*
+   - *Reason*: While the input parser already accepts both `"5.65 G"` and `"5,65 G"`, adding a Preferences option to format *displayed* values on the canvas and in dialogs with either a decimal dot (`4.7 kΩ`) or a decimal comma (`4,7 kΩ`) would make the UI feel native in Croatian and other European locales.
+8. **Startup Self-Check for Stale or Missing Symbol Metadata / SVG Files** *(Effort: Small)*
+   - *Reason*: Running a fast check on startup that verifies all 11 built-in IEC symbol `.json` definitions exist, match the expected terminal grid footprints, and log a non-blocking banner if a user-edited `.svg` file has syntax or viewBox mismatches makes custom symbol authoring easier to debug.

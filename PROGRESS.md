@@ -17,24 +17,22 @@
     - Union-Find netlist extractor (`extract_connectivity`, `CircuitScene.build_circuit()`) enforcing exact schematic connectivity rules (wire endpoints on terminals, crossing wires do not connect without a T-junction or explicit junction dot, isolated junction dots not on any wire are ignored and never create nets or false warnings, attached wire deletion/re-routing, zero-length/duplicate/collinear wire normalization).
   - **Interactive Orthogonal Wiring & Full `QUndoStack` Editing (`src/circuitsim/canvas/wire_item.py`, `commands.py`, `scene.py`, `view.py`)**:
     - Rubber-band selection, group move, Rotate 90° CW (`R`), Flip Horizontal (`F`), Delete (`Del`/`Backspace`), Cut/Copy/Paste, and full `QUndoStack` Undo/Redo (`Ctrl+Z`/`Ctrl+Y`) including parameter edits.
-- **Milestone 2 — Step 2C: Live Simulation Worker, Canvas Readouts, Interactive Switch, Bulb Glow & Problem Highlighting**:
+- **Milestone 2 — Step 2C & Post-2C Polish: Live Simulation Worker, Canvas Readouts, Interactive Switch, Bulb Glow, Problem Highlighting & Usability Fixes**:
   - **Pure-Python Simulation Session & Process-Ready Protocol (`src/circuitsim/engine/simulation_session.py`, zero Qt imports)**:
-    - `SimulationSession` and `SimulationBackendProtocol` handle schematic-to-solver execution (`start`, `pause`, `stop`, `step_chunk`, `toggle_switch`, `update_component_parameter`) and emit immutable, picklable `SimulationFrame`, `ComponentTelemetry`, and `ProblemDiagnostic` dataclasses.
+    - `SimulationSession` and `SimulationBackendProtocol` handle schematic-to-solver execution (`start`, `pause`, `stop`, `step_chunk`, `toggle_switch`, `update_component_parameter`), transport-control state mapping (`compute_transport_controls_state`), and emit immutable, picklable `SimulationFrame`, `ComponentTelemetry`, and `ProblemDiagnostic` dataclasses.
   - **Background `QThread` Worker (`src/circuitsim/app/sim_worker.py`)**:
-    - `SimulationWorkerController` runs `_SessionThreadWorker` on a dedicated background `QThread` communicating strictly via queued Qt signals so the main GUI thread never freezes during simulation.
-  - **Live Meters, Upright Labels, Animated Switch, Lightbulb Glow & Quick Value Editing**:
-    - Voltmeter and Ammeter display `"-- V"` and `"-- A"` before simulation starts and after `Stop` (never a fake `0`), and show auto-ranged live readings while running.
-    - Component labels (`R1`, `V1`) and values (`1 kΩ`, `12 V`) stay upright (`0°`) and readable under any rotation (`90°`, `180°`, `270°`) or horizontal flip (`F`).
-    - Clicking a `Switch` on the canvas smoothly animates its lever blade (`QVariantAnimation`) and toggles the live simulation state.
-    - `Lightbulb` renders a warm radial glow proportional to dissipated power ($P / P_{\text{rated}}$) and displays an overload warning badge (`>100%!`) and status bar warning when overloaded.
-    - Double-clicking any component opens `QuickValueDialog` (`src/circuitsim/dialogs/quick_edit_dialog.py`), built dynamically from `Component.get_editable_parameters()`, validated with the engineering-notation parser, and applied live while running (with Undo/Redo support).
-    - Canvas and status bar highlight errors in red (`no_ground`, `floating_node`, `voltage_source_loop`, `singular_matrix`) and warnings in amber (`ammeter_in_parallel`, `inductive_kickback`, `over_bright`).
-    - Compacted top toolbar button labels (`iconText`) so the `Speed` dropdown (`1x Real-Time`, `0.1x Slow`, `10x Fast`) is always visible without overflowing.
+    - `SimulationWorkerController` runs `_SessionThreadWorker` on a dedicated background `QThread` communicating strictly via queued Qt signals so the main GUI thread never freezes during simulation, and stops cleanly when `MainWindow` closes.
+  - **Value Input, Live Editing, Undo/Redo, Transport States, Unconnected Parts & Selection Outline**:
+    - **Value Parser (`value_parser.py` & `quick_edit_dialog.py`)**: Accepts single decimal comma (`"5,65 G"`), spaces before prefix (`"4.7 k"`), uppercase `"K"` as kilo (`"10K"`), shows live parsed preview (`= 5.65 GΩ`) beneath each input field, and displays clear plain-language error messages.
+    - **Live Editing & Undo/Redo**: Double-clicking any component opens `QuickValueDialog` with a note that changes apply immediately while running (`t = 0` note on capacitor initial voltage), and pushes an undoable `EditComponentParametersCommand` (`Ctrl+Z` / `Ctrl+Y`) that updates the component model, canvas label, and live simulation both when stopped and when running.
+    - **Run / Pause / Stop Visual States**: Distinct green active Run, amber active Pause (`▶ Resume`), red Error outline, and left-hand status bar indicator (`● Running`, `❚❚ Paused`, `■ Stopped`) across Dark and Light themes.
+    - **Unconnected Parts & Ground Hint**: Components with no wires attached are dimmed (`opacity = 0.45`) and ignored with an amber warning (`"B1 is not connected and is ignored"`) so the rest of the circuit runs; connected islands with no path to ground still raise a floating-node error; missing ground reports `"No ground connected — Add a Ground part and wire it to the circuit"`.
+    - **Selection Outline**: Component selection and diagnostic boxes stay strictly clear of upright name (`R1`) and value (`1 kΩ`) labels across all rotations (`0°`, `90°`, `180°`, `270°`).
 - **Unit Test Suite (`tests/`)**:
-  - **79 passing tests** (56 engine/physics tests + 6 symbol/SVG loader tests + 9 connectivity/editing tests + 8 Step 2C simulation session, live editing, diagnostics, upright label, toolbar visibility, and non-freezing `QThread` UI responsiveness tests).
+  - **95 passing tests** (including split analytic meter/switch/live-edit tests `6a`, value edit Undo/Redo while stopped and running `6b`, clean worker `QThread` shutdown on window close `6c`, real canvas item/wire highlight colours `6d`, and a 30-resistor ladder + RC load UI responsiveness benchmark `6e`).
 
 ### What Is Next (Milestone 3)
-- **Milestone 3**: Full multi-tab Properties Dialog (extending the `ComponentParameter` system), 10-slot Saved Parts bar persistence & keyboard shortcuts (`1`–`9`, `0`), and `.csim` JSON save/load/export.
+- **Milestone 3**: Versioned `.circ` JSON save/load (`Step 3A`), 10-slot Saved Parts bar with persistence & shortcuts `1`–`9`, `0` (`Step 3B`), and full Properties Dialog with live $V$, $I$, $P$ readouts and inductor $X_L$ & $\tau$ (`Step 3C`).
 
 ### How to Run the App, Preview Tool, and Tests
 
@@ -48,6 +46,6 @@
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (79 tests)
+# Run the full test suite (95 tests)
 .\.venv\Scripts\pytest.exe
 ```

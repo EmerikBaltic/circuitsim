@@ -15,33 +15,37 @@ In **Step 2C**, we brought the schematic canvas to life! Pressing **Run (`F5`)**
 
 ---
 
-### 2. Key Engineering & UI Design Decisions in Step 2C
+### 2. Plain-Language Explanations of Key Concepts (Step 2C & Usability Polish)
 
-1. **Why Separate `SimulationSession` from `QThread`? (`SimulationBackendProtocol`)**:
-   - GUI code is hard to unit-test if solver state is tangled inside `QMainWindow` slots. By putting all session control (`start`, `pause`, `stop`, `step_chunk`, `toggle_switch`, `update_component_parameter`) in [`simulation_session.py`](src/circuitsim/engine/simulation_session.py) with **zero `PySide6` imports**, our pytest suite tests live meter readings, switch toggling, live resistor edits, lightbulb over-brightness, and error diagnostics directly in pure Python.
-   - `SimulationWorkerController` in [`sim_worker.py`](src/circuitsim/app/sim_worker.py) then runs `SimulationSession` on a background `QThread`. Every ~33 ms (~30 FPS), the worker advances a chunk of transient steps (`step_chunk`) and emits an immutable `SimulationFrame` back to the GUI thread.
-2. **How We Verified That the UI Never Freezes During Simulation**:
-   - In [`tests/test_simulation_session_and_step2c.py`](tests/test_simulation_session_and_step2c.py) (`test_qt_step2c_ui_responsiveness_upright_labels_speed_dropdown_and_quick_edit`), we start a main-thread `QTimer` firing every `10 ms` to measure GUI event-loop heartbeats while `win.start_simulation()` runs the solver continuously in its background `QThread`.
-   - Over a `240 ms` window, the main GUI thread processes regular `10 ms` heartbeats without a single stall (`max_gap_ms < 120 ms`) while receiving live `SimulationFrame` updates that change the canvas voltmeter from `"-- V"` to `"12 V"`.
-3. **Keeping Labels & Values Upright When Rotated or Flipped**:
-   - If you rotate a `QGraphicsItem` using `item.setRotation(180)` or mirror it with `QTransform.fromScale(-1, 1)`, Qt rotates and mirrors all text drawn inside `paint()`, making labels upside-down or backwards!
-   - Instead, `ComponentItem` keeps its `QGraphicsObject` transform as the **identity matrix** (`item.transform().isIdentity() == True`). Inside `ComponentItem.paint()`, we `painter.save()`, apply the rotation and horizontal flip *only* while drawing the symbol graphic, `painter.restore()`, and then draw the designator (`R1`) and value (`1 kΩ`) at `0°` in local coordinates—adjusting their offset above/below or to the right of the body when the component is vertical (`90°`/`270°`).
-4. **Honest Meter Readouts (`"-- V"` and `"-- A"`)**:
-   - Before a simulation starts (or after pressing **Stop** or encountering a circuit error), a meter has not measured anything. Showing `"0 V"` or `"0 A"` would mislead students into thinking the circuit was solved with zero voltage.
-   - `Voltmeter` and `Ammeter` track `has_reading: bool = False` (set to `True` only when `record_sample()` receives a solver solution, and reset to `False` in `reset_state()`), displaying `"-- V"` and `"-- A"` until a real reading exists.
-5. **Isolated Junction Dots Never Create Phantom Nets**:
-   - In [`connectivity.py`](src/circuitsim/canvas/connectivity.py), an explicit junction dot placed in empty space (or anywhere not lying on at least one wire segment) is ignored during netlist extraction and visual dot rendering, so it can never create a floating net, a phantom connection, or a false warning.
+1. **What a `QThread` Is and Why the Solver Runs on One**:
+   - In a desktop app, the **main thread** (also called the GUI thread) has one job: draw the window and respond immediately when you move the mouse, click buttons, drag parts, or press keys. If the main thread spends even `200 ms` solving matrices in a `while` loop, the whole window stops responding and the operating system marks it *"Not Responding"*.
+   - A **`QThread`** is Qt's way of running a second event loop in the background alongside the main GUI thread. Our solver worker (`_SessionThreadWorker` in [`sim_worker.py`](src/circuitsim/app/sim_worker.py)) lives on that background `QThread`. Every ~33 ms (~30 times per second), it steps the circuit equations forward by a small chunk of time and sends a finished snapshot (`SimulationFrame`) back to the main thread over a **queued Qt signal**. Because the main thread only paints the snapshot that arrived, panning, zooming, and clicking switches stay smooth even on a 30-resistor ladder + $RC$ circuit!
+
+2. **What `SimulationSession` Does**:
+   - [`SimulationSession`](src/circuitsim/engine/simulation_session.py) is the "conductor" between your schematic drawing and the math solver (`MNASolver`). It has **zero Qt imports**, so it can run in pure Python or inside a test without opening a window.
+   - When you press **Run (`F5`)**, `SimulationSession` takes the placed components and wires, extracts the electrical netlist (ignoring any completely unconnected part with a gentle warning so the rest of the circuit can still run), solves the DC operating point and transient steps, updates every meter and lightbulb, and packages all voltages, currents, powers, and problem diagnostics into an immutable `SimulationFrame`.
+   - It also handles live actions—like toggling a switch (`toggle_switch`) or editing a component's value (`update_component_parameter`)—and immediately recomputes the circuit state so you see the new reading right away.
+
+3. **Why Labels Stay Upright When Rotated (and Clear of the Selection Box)**:
+   - If you rotate a whole Qt graphics item by `90°`, `180°`, or `270°` (or flip it horizontally), Qt rotates or mirrors *everything* drawn inside that item—including text—so `"R1"` and `"1 kΩ"` would appear upside-down, vertical, or mirror-reversed.
+   - Instead, [`ComponentItem`](src/circuitsim/canvas/component_item.py) keeps the item's own transform at `0°` (`isIdentity() == True`). Inside `paint()`, we temporarily rotate/flip the `QPainter` *only* while drawing the electrical symbol and its selection box, then restore the painter to `0°` before drawing the text.
+   - We also position the upright text rectangles outside the `±23 px` selection outline (above and below the symbol when horizontal at `0°`/`180°`, or to the right of the symbol when vertical at `90°`/`270°`) so the dashed selection frame never cuts through the label or value text.
+
+4. **Why Comma and Dot Decimals Need Care (`"5,65 G"` vs. `"1,234.5"`)**:
+   - In many countries (such as Croatia, Germany, and France), people write a comma as the decimal mark (`"5,65 G"` or `"4,7 k"`), whereas English locales use a dot (`"5.65 G"`). However, English formatting also uses commas as thousands separators (`"1,234.5"` or `"1,000,000"`).
+   - If a parser blindly replaced every comma with a dot or deleted commas, `"1,234"` could be silently misinterpreted by a factor of $1000\times$ ($1.234$ vs. $1234$).
+   - To be both helpful and safe, [`parse_engineering_value`](src/circuitsim/dialogs/value_parser.py) accepts a **single comma** as the decimal separator *only when there is no dot in the string* (`"5,65 G" -> 5.65 G`). If the input contains multiple commas (`"1,2,3"`) or both a comma and a dot (`"1,234.5"`), it refuses to guess and shows a friendly plain-language example (`"Couldn't read '...'. Try 4.7k or 5.65G..."`), while the dialog also displays a live parsed preview (`= 5.65 GΩ`) beneath the text box as you type.
 
 ---
 
 ### 3. Three Small Exercises You Can Try (Step 2C)
 
-1. **Live Ohm's Law & Double-Click Value Editing**:
-   Launch `.\.venv\Scripts\python.exe -m circuitsim.main`, wire a **DC Voltage Source** (`12 V`), a series **Switch**, a series **Ammeter**, a **Resistor** (`1 kΩ`) with a parallel **Voltmeter**, and a **Ground**. Notice the meters read `-- V` and `-- A`. Press **Run (`F5`)**, click the switch to close it (`12 V`, `12 mA`), and **double-click the resistor** while running to change its value to `2k` or `500`—watch the ammeter update immediately to `6 mA` or `24 mA`!
-2. **Lightbulb Glow & Over-Bright Warning**:
-   Replace the resistor with a **Lightbulb** (`60W / 120V`) and double-click the DC source to set `120V`. Press **Run (`F5`)** to see the warm yellow glow at 100% rated power. Now double-click the DC source and enter `180V`: the glow intensifies, an orange `>100%!` badge appears on the bulb, and the status bar warns that the bulb is overloaded (`225%`).
-3. **Canvas Problem Highlighting**:
-   Delete the **Ground** symbol while the circuit is running (or press **Run** without a ground): all components and wires highlight in red and the status bar reports `Error: No ground connected`. Press **`Ctrl+Z`** to undo deleting the ground and press **Run (`F5`)**—the red highlight clears and the simulation resumes!
+1. **Live Ohm's Law, Decimal Comma & Undo/Redo (`Ctrl+Z` / `Ctrl+Y`)**:
+   Launch `.\.venv\Scripts\python.exe -m circuitsim.main`, wire a **DC Voltage Source** (`12 V`), a series **Switch**, a series **Ammeter**, a **Resistor** (`1 kΩ`) with a parallel **Voltmeter**, and a **Ground**. Press **Run (`F5`)** (`12 V`, `12 mA`), then **double-click the resistor** while running and type `0,5 k` (with a comma and space): notice the live preview shows `= 500 Ω`, and clicking **OK** immediately updates the ammeter to `24 mA`. Now press **`Ctrl+Z`** and **`Ctrl+Y`** while the simulation is still running—watch the resistor and live current jump back and forth between `1 kΩ` (`12 mA`) and `500 Ω` (`24 mA`)!
+2. **Unconnected Parts vs. Floating Islands**:
+   While your circuit is running, drop an extra **Lightbulb** onto an empty corner of the canvas without wiring it. Notice that the simulation keeps running, the unconnected bulb is drawn dimmed (`45%` opacity), and the status bar shows an amber warning (`Warning: B1 is not connected and is ignored`). Now wire a second resistor to that bulb without connecting them to Ground, and press **Run (`F5`)**: because two wired parts form a floating island, the solver stops and highlights the island in red!
+3. **Canvas Problem Highlighting & Transport Button States**:
+   Delete the **Ground** symbol and press **Run (`F5`)**: observe the red Error outline on the **Run** button, the `■ Stopped` indicator on the left of the status bar, the red highlight on the circuit, and the message `Error: No ground connected — Add a Ground part and wire it to the circuit`. Press **`Ctrl+Z`** to restore Ground and press **Run (`F5`)** to see the green `● Running` state and `❚❚ Pause` (`▶ Resume`) transitions.
 
 ---
 
