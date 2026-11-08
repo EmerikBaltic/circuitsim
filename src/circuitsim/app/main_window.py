@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -331,13 +333,24 @@ class MainWindow(QMainWindow):
             self.symbol_library, theme=self.theme, parent=self.palette_dock
         )
         self.palette_dock.setWidget(self.palette_widget)
-        self.palette_dock.setMinimumWidth(240)
+        self.palette_dock.setFixedWidth(240)
         self.addDockWidget(
             Qt.DockWidgetArea.LeftDockWidgetArea, self.palette_dock
         )
 
         # 2. Right Dock: Properties / Info Panel
         self.info_dock = QDockWidget("Properties / Info Panel", self)
+        self.info_dock.setFixedWidth(280)
+
+        self.info_scroll = QScrollArea(self.info_dock)
+        self.info_scroll.setWidgetResizable(True)
+        self.info_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.info_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
         info_container = QWidget()
         info_layout = QVBoxLayout(info_container)
         info_layout.setContentsMargins(10, 10, 10, 10)
@@ -346,9 +359,12 @@ class MainWindow(QMainWindow):
         self.info_label.setAlignment(
             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
         )
+        self.info_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         info_layout.addWidget(self.info_label)
-        self.info_dock.setWidget(info_container)
-        self.info_dock.setMinimumWidth(275)
+        self.info_scroll.setWidget(info_container)
+        self.info_dock.setWidget(self.info_scroll)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.info_dock)
 
         # Add dock panel visibility actions to View menu
@@ -359,6 +375,8 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self) -> None:
         sb = self.statusBar()
+        sb.setSizeGripEnabled(False)
+        sb.setFixedHeight(26)
         self.status_state_indicator = QLabel("■ Stopped")
         self.status_coords = QLabel("Grid: (0, 0) | Pos: (0, 0) px")
         self.status_sim = QLabel("Sim: Stopped (t = 0 s)")

@@ -65,7 +65,7 @@ class CircuitView(QGraphicsView):
         self.setTransformationAnchor(
             QGraphicsView.ViewportAnchor.AnchorUnderMouse
         )
-        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
         self.centerOn(0.0, 0.0)
 
     @property
@@ -216,6 +216,8 @@ class CircuitView(QGraphicsView):
 
             # Prepare for component selection / drag-move
             self.circuit_scene.begin_component_move_tracking()
+            self._left_press_pos = event.pos()
+            self._drag_threshold_reached = False
 
         super().mousePressEvent(event)
 
@@ -245,12 +247,28 @@ class CircuitView(QGraphicsView):
             event.accept()
             return
 
+        if (
+            event.buttons() & Qt.MouseButton.LeftButton
+            and not self._is_panning
+            and not self.circuit_scene.is_drawing_wire
+            and hasattr(self, "_left_press_pos")
+            and not self._drag_threshold_reached
+        ):
+            if (event.pos() - self._left_press_pos).manhattanLength() < 4:
+                event.accept()
+                return
+            self._drag_threshold_reached = True
+
         self._update_cursor_for_scene_pos(scene_pt)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         scene_pt: QPointF = self.mapToScene(event.pos())
         self._last_scene_pos = scene_pt
+
+        if hasattr(self, "_left_press_pos"):
+            del self._left_press_pos
+        self._drag_threshold_reached = False
 
         if self._is_panning and event.button() in (
             Qt.MouseButton.MiddleButton,
