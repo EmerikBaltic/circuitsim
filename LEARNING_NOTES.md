@@ -1,65 +1,75 @@
 # Learning Notes — CircuitSim
 
+## Milestone 2 — Step 2B: Schematic Connectivity Rules, Union-Find Netlist Extraction & `QUndoStack`
+
+In **Step 2B**, we connected the visual schematic editor to the physics engine! When you place parts and draw orthogonal wires on the canvas, **CircuitSim** extracts an electrical netlist (`CircuitScene.build_circuit()`) that feeds directly into our Modified Nodal Analysis (`MNASolver`) engine from Milestone 1.
+
+---
+
+### 1. Which Files to Read First (Step 2B)
+
+1. [`src/circuitsim/canvas/connectivity.py`](src/circuitsim/canvas/connectivity.py) — **Pure Python (zero Qt imports!)**. Implements right-angle wire routing (`route_orthogonal_wire`), polyline simplification (`simplify_orthogonal_points`), attached-wire re-routing (`reroute_wires_for_updated_terminals`), and the Union-Find netlist extractor (`extract_connectivity`).
+2. [`src/circuitsim/canvas/wire_item.py`](src/circuitsim/canvas/wire_item.py) — Draws orthogonal wires (`QPainterPath`) with a 10 px hit-test stroke (`QPainterPathStroker`) for easy clicking/selection and a dashed live-preview mode while routing a new wire.
+3. [`src/circuitsim/canvas/commands.py`](src/circuitsim/canvas/commands.py) — Implements `QUndoCommand` classes (`AddComponentCommand`, `AddWireCommand`, `MoveComponentsCommand`, `RotateComponentsCommand`, `FlipComponentsCommand`, `DeleteItemsCommand`, `PasteItemsCommand`, `ToggleJunctionCommand`) so every edit can be undone (`Ctrl+Z`) and redone (`Ctrl+Y`).
+4. [`tests/test_connectivity_and_editing.py`](tests/test_connectivity_and_editing.py) — Shows how a voltage divider and an $RC$ transient circuit built from pixel coordinates and wires produce the exact same answers as hand-built Milestone 1 circuits and analytical formulas.
+
+---
+
+### 2. Schematic Connectivity Rules (Step 2B)
+
+Real schematic capture tools (like KiCad, LTspice, and Altium) follow strict rules so you never get accidental short circuits when wires cross on a crowded diagram. **CircuitSim** enforces these three core connectivity rules in [`connectivity.py`](src/circuitsim/canvas/connectivity.py):
+
+1. **Terminals, Crossings, T-Junctions, and Explicit Junction Dots**:
+   - **Terminal connection**: A wire connects to a component terminal **only if a wire endpoint sits at that terminal's exact grid coordinate** (or an explicit junction dot is placed there). A wire passing straight over a terminal without ending there does *not* connect.
+   - **Crossing wires do NOT connect**: Two perpendicular wires that cross at an interior point `(x, y)` (where neither wire ends) remain electrically separate nets.
+   - **T-junctions and Explicit Junction Dots DO connect**: Two wires connect if and only if:
+     - They share an endpoint at `(x, y)`,
+     - One wire's endpoint lands on the interior segment of another wire (forming a **T-junction**), or
+     - You place an explicit **Junction Dot** (`J` key or right-click menu) at their intersection `(x, y)`.
+2. **Attached Wires on Delete, Move, Rotate, and Flip**:
+   - **Deleting a component** automatically finds and deletes all wires whose endpoints sit on any of that component's terminals (and pressing `Ctrl+Z` restores both the component and all of its attached wires).
+   - **Moving, rotating (`R`), or flipping (`F`)** one or more components keeps all attached wire endpoints locked to their respective component terminals and automatically re-routes the wires at $90^\circ$ right angles.
+3. **Zero-Length, Duplicate, and Overlapping Wires**:
+   - **Zero-length wires** (where start and end collapse to the same point, including folded-back paths like `(0,0) -> (20,0) -> (0,0)`) are discarded during normalization so they can never act as phantom T-junctions on a wire crossing.
+   - **Duplicate wires** (identical polylines drawn forward or backward) are deduplicated.
+   - **Collinear overlapping wires** (two horizontal segments on the same $y$ or two vertical segments on the same $x$ whose spans overlap with positive length) are unified into a single conductor without creating phantom connections to perpendicular crossing wires.
+
+---
+
+### 3. How Union-Find Extracts the Netlist (`extract_connectivity`)
+
+How do we turn a drawing of components and wires into node names like `"0"`, `"N1"`, `"N2"`?
+We use the **Disjoint-Set (Union-Find)** algorithm:
+1. Every component terminal `("term", comp_name, term_name)` and every normalized wire `("wire", wire_id)` starts in its own singleton set.
+2. Whenever a wire endpoint sits on a terminal, we call `uf.union(wire, terminal)`.
+3. Whenever a wire endpoint lies on another wire (endpoint-to-endpoint or T-junction), or two collinear wire segments overlap, we call `uf.union(wire_a, wire_b)`.
+4. Whenever an explicit junction dot sits at `(x, y)`, we union all wires and terminals passing through `(x, y)`.
+5. After all unions finish, every disjoint set is one **electrical node (net)**:
+   - Any set containing a `Ground` component's terminal is named `"0"` (the $0\text{ V}$ reference node).
+   - Every other set gets a deterministic name `"N1"`, `"N2"`, ... sorted by grid position.
+   - Each component is cloned into a `Circuit` with its terminal node names filled in!
+
+---
+
+### 4. Three Small Exercises You Can Try (Step 2B)
+
+1. **Wire Up a Voltage Divider and Inspect Live Nets**:
+   Launch `.\.venv\Scripts\python.exe -m circuitsim.main`, drag a **DC Voltage Source**, two **Resistors**, and a **Ground** onto the canvas, and drag wires between their terminals. Click each resistor and look at the **Properties / Info Panel** on the right—you will see the exact resolved net names (`Node 0`, `Node N1`, `Node N2`) for every terminal!
+2. **Test Crossing Wires vs. Junction Dots (`J`)**:
+   Draw two wires that cross like a `+` sign between four resistors. Click the resistors to verify the horizontal and vertical wires have *different* node names (`Node N1` vs. `Node N2`). Now move your cursor to the crossing point and press **`J`** (or right-click → **Toggle Junction Dot Here**): a junction dot appears and both wires immediately unify into the same node!
+3. **Drag, Rotate (`R`), Delete (`Del`), and Undo (`Ctrl+Z`)**:
+   Drag a wired resistor to a new spot on the canvas and watch its attached wires re-route at right angles in real time. Press `Del` to delete the resistor (which also removes its attached wires), then press `Ctrl+Z` to bring the resistor and all its wires right back.
+
+---
+
 ## Milestone 2 — Step 2A: Qt Graphics View Architecture, Grid Geometry & Hybrid SVG/Procedural Symbols
 
-In **Step 2A**, we built the visual foundation of **CircuitSim**: the dockable `QMainWindow`, the searchable component palette, the hybrid SVG + procedural IEC 60617 symbol renderer, and the interactive schematic canvas (`QGraphicsScene` + `QGraphicsView`).
-
----
-
-### 1. Which Files to Read First (Step 2A)
-
-1. [`src/circuitsim/canvas/symbol_geometry.py`](src/circuitsim/canvas/symbol_geometry.py) — Pure Python (no Qt imports!). Shows how grid coordinates (`1 grid unit = 20 px`) are converted to pixels, how terminal positions transform when a component is rotated or flipped, and how SVG files are validated and recoloured using Python's built-in `xml.etree.ElementTree`.
-2. [`src/circuitsim/resources/symbols/iec/resistor.json`](src/circuitsim/resources/symbols/iec/resistor.json) & [`switch.json`](src/circuitsim/resources/symbols/iec/switch.json) — Small JSON files declaring each component's grid size (`[4, 2]`), terminal coordinates (`[-2, 0]` and `[2, 0]`), and visual states (`open`, `closed`).
-3. [`src/circuitsim/canvas/symbol_renderer.py`](src/circuitsim/canvas/symbol_renderer.py) — The `SymbolLibrary` class that checks if a custom `.svg` file exists in `resources/symbols/iec/`; if so, it renders the recoloured SVG with `QSvgRenderer`, and if not, it draws the IEC 60617 symbol procedurally using `QPainter`.
-4. [`src/circuitsim/canvas/component_item.py`](src/circuitsim/canvas/component_item.py) — Represents a placed component on the schematic (`QGraphicsObject`), handling 20 px grid snapping in `itemChange`, 90° rotation (`R`), horizontal flip (`F`), and reference/value labels (`R1`, `1 kΩ`).
-5. [`src/circuitsim/canvas/scene.py`](src/circuitsim/canvas/scene.py) & [`src/circuitsim/canvas/view.py`](src/circuitsim/canvas/view.py) — The `QGraphicsScene` (draws the 20 px minor / 100 px major background grid and manages the translucent ghost preview) and `QGraphicsView` (handles cursor-centered mouse-wheel zoom, middle-click or `Space`+drag panning, and palette drag-and-drop).
-6. [`src/circuitsim/app/main_window.py`](src/circuitsim/app/main_window.py) — Assembles the dockable panels (`QDockWidget`), toolbars, status bar, and Dark/Light theme switching.
-
----
-
-### 2. Key Concepts in Step 2A
-
-#### How `QGraphicsScene`, `QGraphicsView`, and `QGraphicsObject` Work Together
-Qt's Graphics View framework separates **what** is in the schematic from **how** you look at it:
-- **`CircuitScene` (`QGraphicsScene`)** is the infinite 2D world in **scene coordinates** (where $1\text{ grid unit} = 20\text{ px}$). A resistor placed at `(100, 60)` stays at `(100, 60)` in scene coordinates regardless of how far you zoom or pan.
-- **`CircuitView` (`QGraphicsView`)** is the camera window looking at the scene. When you roll the mouse wheel, `CircuitView` calls `self.scale(factor, factor)` with `AnchorUnderMouse`, which zooms smoothly around the exact point under your cursor without modifying any component's scene coordinates.
-- **`ComponentItem` (`QGraphicsObject`)** lives inside the scene and has its own **local item coordinates** centered at `(0, 0)`. For a `4x2` component (`80x40 px`), its local bounding box spans $x \in [-40, +40]$ and $y \in [-20, +20]$, with terminals at `(-40, 0)` and `(+40, 0)`.
-
-#### Supporting Both `viewBox="0 0 80 40"` and Centered Coordinates
-When you draw a symbol in Inkscape or Figma on an $80 \times 40\text{ px}$ canvas, the tool exports `viewBox="0 0 80 40"` where the top-left corner is `(0, 0)`, the center is `(40, 20)`, and the left/right terminals sit at `(0, 20)` and `(80, 20)`.
-Meanwhile, `ComponentItem` rotates around its center `(0, 0)`, so it always passes the centered target rectangle `QRectF(-40, -20, 80, 40)` to `QSvgRenderer.render(painter, target_rect)`. Because `QSvgRenderer` automatically maps the SVG's `viewBox` onto `target_rect`:
-- Point `(0, 20)` in `viewBox="0 0 80 40"` maps to `(-40, 0)` in item coordinates (Terminal `a`).
-- Point `(80, 20)` in `viewBox="0 0 80 40"` maps to `(+40, 0)` in item coordinates (Terminal `b`).
-Both `viewBox="0 0 80 40"` and `viewBox="-40 -20 80 40"` therefore land on the exact same grid terminals!
-
-#### Terminal Math Under Flip and Rotation
-To keep terminal positions testable without opening a Qt window, `transform_terminal_px` in [`symbol_geometry.py`](src/circuitsim/canvas/symbol_geometry.py) applies the exact same two-step transform as `ComponentItem._apply_transform`:
-1. **Horizontal Flip (`flipped=True`)**: Negate local $x$: $(x_1, y_1) = (-x_0, y_0)$.
-2. **Clockwise Rotation (`rotation_deg` in `{0, 90, 180, 270}`)**:
-   - $0^\circ$: $(x_1, y_1)$
-   - $90^\circ$ CW (in screen coordinates where $+y$ points down): $(-y_1, x_1)$
-   - $180^\circ$: $(-x_1, -y_1)$
-   - $270^\circ$ CW: $(y_1, -x_1)$
-
-Because every terminal starts on an integer grid coordinate and is rotated by multiples of $90^\circ$ around a grid-snapped center, **every terminal is guaranteed to land on an exact multiple of $20\text{ px}$** after any combination of rotations and flips.
-
----
-
-### 3. Three Small Exercises You Can Try (Step 2A)
-
-1. **Inspect All Symbols and Terminal Dots**:
-   Run `.\.venv\Scripts\python.exe -m circuitsim.tools.symbol_preview` and compare the Dark and Light theme columns. Notice how every red/orange terminal dot sits on a 20 px grid intersection.
-2. **Test Custom SVG Hot-Loading**:
-   Create a simple file `src/circuitsim/resources/symbols/iec/resistor.svg` with `viewBox="0 0 80 40"` and a `#000000` stroke path from `(0, 20)` to `(80, 20)`, then re-run `python -m circuitsim.tools.symbol_preview`. Its subtitle will automatically change from `[procedural IEC]` to `[SVG file]` and recolour in both themes!
-3. **Break an SVG on Purpose to See the Tolerant Fallback**:
-   Change `viewBox="0 0 80 40"` in your test `resistor.svg` to `viewBox="0 0 999 999"` and run the preview tool. You will see a clear warning explaining the dimension mismatch while the app stays up and falls back to the procedural IEC resistor.
+1. [`src/circuitsim/canvas/symbol_geometry.py`](src/circuitsim/canvas/symbol_geometry.py) — Converts grid units (`1 grid unit = 20 px`) to pixels, transforms terminal coordinates under rotation/flip, and validates/recolours custom SVGs (`viewBox="0 0 80 40"` or centered `"-40 -20 80 40"`).
+2. [`src/circuitsim/canvas/symbol_renderer.py`](src/circuitsim/canvas/symbol_renderer.py) — Renders custom SVGs when present in `resources/symbols/iec/` or procedural IEC 60617 fallback graphics via `QPainter`.
 
 ---
 
 ## Milestone 1 (Steps A & B): Modified Nodal Analysis (MNA), Companion Models & Switching Transients
 
-### 1. Core Engine Files
-1. [`src/circuitsim/dialogs/value_parser.py`](src/circuitsim/dialogs/value_parser.py) — Parses engineering strings (`"4.7k"`, `"15m"`) into Python `float` values.
-2. [`src/circuitsim/components/capacitor.py`](src/circuitsim/components/capacitor.py) & [`src/circuitsim/components/inductor.py`](src/circuitsim/components/inductor.py) — Discretize $i = C\frac{dv}{dt}$ and $v = L\frac{di}{dt}$ into companion models ($G_{\text{eq}}$ in parallel with $I_{\text{eq}}$).
-3. [`src/circuitsim/components/switch.py`](src/circuitsim/components/switch.py) — Models a switch with $R_{\text{on}}$, $R_{\text{off}}$, $10\text{ pF}$ contact capacitance, and a simplified $350\text{ V}$ contact breakdown arc clamp.
-4. [`src/circuitsim/engine/netlist.py`](src/circuitsim/engine/netlist.py) & [`src/circuitsim/engine/solver.py`](src/circuitsim/engine/solver.py) — Builds and solves the MNA matrix equation $\mathbf{A}\mathbf{x} = \mathbf{b}$ using cached `scipy.linalg.lu_factor` / `lu_solve`, using Backward Euler after switch/arc events and Trapezoidal integration on normal steps.
+1. [`src/circuitsim/dialogs/value_parser.py`](src/circuitsim/dialogs/value_parser.py) — Case-sensitive engineering notation parser (`"4.7k"`, `"15m"`, `"10M"`).
+2. [`src/circuitsim/components/`](src/circuitsim/components/) & [`src/circuitsim/engine/`](src/circuitsim/engine/) — Companion models and MNA solver ($\mathbf{A}\mathbf{x} = \mathbf{b}$) using cached `scipy.linalg.lu_factor` / `lu_solve`, Backward Euler switching/arc settling, and Trapezoidal integration.

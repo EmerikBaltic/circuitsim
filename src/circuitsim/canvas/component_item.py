@@ -12,6 +12,11 @@ from PySide6.QtWidgets import (
 )
 
 from circuitsim.app.themes import ThemeMode, ThemePalette, get_theme_palette
+from circuitsim.canvas.connectivity import (
+    PlacedComponentSpec,
+    PointPx,
+    normalize_point_px,
+)
 from circuitsim.canvas.symbol_geometry import (
     GRID_PITCH_PX,
     SymbolMetadata,
@@ -166,9 +171,24 @@ class ComponentItem(QGraphicsObject):
         self.rotation_deg = (self.rotation_deg + 90) % 360
         self._apply_local_transform()
 
+    def rotate_90_ccw(self) -> None:
+        """Rotate component 90 degrees counter-clockwise around its center `(0, 0)`."""
+        self.rotation_deg = (self.rotation_deg - 90) % 360
+        self._apply_local_transform()
+
+    def set_rotation_deg(self, rotation_deg: int) -> None:
+        """Set explicit rotation angle in `{0, 90, 180, 270}`."""
+        self.rotation_deg = int(rotation_deg) % 360
+        self._apply_local_transform()
+
     def flip_horizontal(self) -> None:
         """Mirror the component horizontally across its local Y axis."""
         self.flipped_h = not self.flipped_h
+        self._apply_local_transform()
+
+    def set_flipped_h(self, flipped: bool) -> None:
+        """Set explicit horizontal mirror state."""
+        self.flipped_h = bool(flipped)
         self._apply_local_transform()
 
     def _apply_local_transform(self) -> None:
@@ -194,6 +214,23 @@ class ComponentItem(QGraphicsObject):
             )
         return result
 
+    def terminal_scene_positions_px(self) -> dict[str, PointPx]:
+        """Return integer snapped scene pixel coordinates `(x, y)` for every terminal."""
+        return {
+            tname: normalize_point_px(pos, snap=True)
+            for tname, pos in self.terminal_scene_positions().items()
+        }
+
+    def to_placed_spec(self) -> PlacedComponentSpec:
+        """Build a pure-Python `PlacedComponentSpec` snapshot for netlist extraction."""
+        return PlacedComponentSpec(
+            component=self.component,
+            center_px=(self.pos().x(), self.pos().y()),
+            rotation_deg=self.rotation_deg,
+            flipped_h=self.flipped_h,
+            terminals_px=self.terminal_scene_positions_px(),
+        )
+
     def boundingRect(self) -> QRectF:
         w_px, h_px = self.metadata.pixel_size
         # Include padding for component name and value labels above/below the symbol
@@ -218,6 +255,10 @@ class ComponentItem(QGraphicsObject):
         ):
             sx, sy = snap_to_grid(value.x(), value.y(), GRID_PITCH_PX)
             return QPointF(sx, sy)
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            sc = self.scene()
+            if sc is not None and hasattr(sc, "on_component_position_changed"):
+                sc.on_component_position_changed(self)
         return super().itemChange(change, value)
 
     def paint(

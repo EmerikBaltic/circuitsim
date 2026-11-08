@@ -1,5 +1,16 @@
-"""Interactive circuit schematic canvas, symbol geometry, and graphics items."""
+"""Schematic canvas, symbol loader, connectivity extractor, and items."""
 
+from circuitsim.canvas.connectivity import (
+    ConnectivityResult,
+    PlacedComponentSpec,
+    PointPx,
+    WireSpec,
+    extract_connectivity,
+    find_wires_attached_to_components,
+    reroute_wires_for_updated_terminals,
+    route_orthogonal_wire,
+    simplify_orthogonal_points,
+)
 from circuitsim.canvas.symbol_geometry import (
     DEFAULT_IEC_SYMBOLS_DIR,
     GRID_PITCH_PX,
@@ -9,7 +20,6 @@ from circuitsim.canvas.symbol_geometry import (
     grid_to_px,
     load_all_iec_metadata,
     load_symbol_metadata,
-    parse_symbol_metadata_dict,
     prepare_svg_for_theme,
     px_to_grid,
     snap_to_grid,
@@ -17,17 +27,25 @@ from circuitsim.canvas.symbol_geometry import (
 )
 
 __all__ = [
+    "ConnectivityResult",
     "DEFAULT_IEC_SYMBOLS_DIR",
     "GRID_PITCH_PX",
+    "PlacedComponentSpec",
+    "PointPx",
     "PreparedSvg",
     "SymbolMetadata",
     "TerminalSpec",
+    "WireSpec",
+    "extract_connectivity",
+    "find_wires_attached_to_components",
     "grid_to_px",
     "load_all_iec_metadata",
     "load_symbol_metadata",
-    "parse_symbol_metadata_dict",
     "prepare_svg_for_theme",
     "px_to_grid",
+    "reroute_wires_for_updated_terminals",
+    "route_orthogonal_wire",
+    "simplify_orthogonal_points",
     "snap_to_grid",
     "transform_terminal_position",
 ]

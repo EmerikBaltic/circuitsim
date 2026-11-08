@@ -25,6 +25,15 @@ CATEGORY_ORDER: tuple[str, ...] = (
     "Instruments",
 )
 
+# Explicit component ordering within each category (matching Section 3.1 of spec)
+COMPONENT_ORDER_IN_CATEGORY: dict[str, tuple[str, ...]] = {
+    "Sources": ("dc_voltage", "ac_voltage", "dc_current", "ground"),
+    "Passive": ("resistor", "capacitor", "inductor"),
+    "Switches": ("switch",),
+    "Loads": ("lightbulb",),
+    "Instruments": ("voltmeter", "ammeter"),
+}
+
 
 class _PaletteTreeWidget(QTreeWidget):
     """Tree widget starting a `QDrag` with `MIME_COMPONENT_ID` when a part is dragged."""
@@ -34,12 +43,13 @@ class _PaletteTreeWidget(QTreeWidget):
         self.symbol_library: SymbolLibrary = symbol_library
         self.theme: ThemeMode = ThemeMode.DARK
         self.setHeaderHidden(True)
-        self.setIconSize(QSize(64, 34))
+        self.setIconSize(QSize(48, 22))
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setAnimated(True)
-        self.setIndentation(14)
+        self.setIndentation(12)
+        self.setUniformRowHeights(True)
 
     def startDrag(self, supported_actions: Qt.DropAction) -> None:
         _ = supported_actions
@@ -82,10 +92,10 @@ class ComponentPaletteWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search components (e.g. resistor, source)...")
+        self.search_input.setPlaceholderText("Search components (e.g. voltmeter, resistor)...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._apply_search_filter)
         layout.addWidget(self.search_input)
@@ -115,6 +125,13 @@ class ComponentPaletteWidget(QWidget):
         for category, comp_ids in grouped.items():
             if not comp_ids:
                 continue
+            preferred = COMPONENT_ORDER_IN_CATEGORY.get(category, ())
+            comp_ids.sort(
+                key=lambda cid: (
+                    preferred.index(cid) if cid in preferred else 999,
+                    cid,
+                )
+            )
             cat_item = QTreeWidgetItem(self.tree, [category])
             cat_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             cat_item.setExpanded(True)
@@ -123,6 +140,7 @@ class ComponentPaletteWidget(QWidget):
                 meta = catalog[comp_id]
                 part_item = QTreeWidgetItem(cat_item, [meta.display_name])
                 part_item.setData(0, Qt.ItemDataRole.UserRole, comp_id)
+                part_item.setSizeHint(0, QSize(180, 26))
                 part_item.setToolTip(
                     0,
                     f"{meta.display_name} ({comp_id})\n"
@@ -131,7 +149,7 @@ class ComponentPaletteWidget(QWidget):
                 part_item.setIcon(
                     0,
                     self.symbol_library.create_palette_icon(
-                        comp_id, theme=self.theme
+                        comp_id, theme=self.theme, size=(48, 22)
                     ),
                 )
 

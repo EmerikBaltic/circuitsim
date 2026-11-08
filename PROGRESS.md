@@ -1,6 +1,6 @@
 # Project Progress — CircuitSim
 
-## Current Status: Milestone 2 — Step 2A Complete
+## Current Status: Milestone 2 — Step 2B Complete
 
 ### What Is Done
 - **Environment, Licensing & Editable Package Installation**:
@@ -11,28 +11,28 @@
   - All 11 Milestone 1 & 2 components (`Ground`, `Resistor`, `Capacitor`, `Inductor`, `DCVoltageSource`, `DCCurrentSource`, `ACVoltageSource`, `Switch` with $350\text{ V}$ contact breakdown arc clamp, `Lightbulb`, `Voltmeter`, `Ammeter`).
   - DC and Transient MNA solver (`Circuit`, `MNASolver`) with topology validation, `thevenin_resistance`, Backward Euler switching/arc settling, and Trapezoidal integration.
 - **Milestone 2 — Step 2A: Main Window, IEC Symbol System, Palette & Schematic Canvas**:
-  - **IEC Symbol Metadata & Convention (`src/circuitsim/resources/symbols/iec/`)**:
-    - 11 JSON metadata files defining `4x2` grid footprints (`80x40 px`, terminals at `[-2, 0]` and `[+2, 0]`) for 2-terminal components and `2x2` (`40x40 px`, terminal at `[0, -1]`) for Ground, plus multi-state definitions for Switch (`open`, `closed`) and Lightbulb (`normal`, `lit`, `burned_out`).
-    - Documented SVG convention in [`src/circuitsim/resources/symbols/iec/README.md`](src/circuitsim/resources/symbols/iec/README.md) supporting both `viewBox="0 0 80 40"` and centered `viewBox="-40 -20 80 40"`.
-  - **Pure-Python Symbol Geometry & Tolerant SVG Loader (`src/circuitsim/canvas/symbol_geometry.py`)**:
-    - Grid snapping (`snap_to_grid`), terminal world-coordinate math under 90° rotations and horizontal flips (`transform_terminal_px`), and tolerant XML/SVG validation and theme recolouring (`validate_and_prepare_svg`) that strips Inkscape/Figma metadata and background rects, recolours `#000000`/`currentColor`, and falls back to procedural IEC symbols with a readable warning on malformed or mismatched SVGs.
-  - **Hybrid SVG / Procedural IEC Renderer (`src/circuitsim/canvas/symbol_renderer.py`)**:
-    - Renders custom SVGs via `QSvgRenderer` when present, or clean IEC 60617 procedural graphics via `QPainter` when absent, in both Dark and Light themes.
-  - **Interactive Schematic Canvas (`src/circuitsim/canvas/scene.py`, `view.py`, `component_item.py`)**:
-    - `CircuitScene` and `CircuitView` with 20 px minor / 100 px major grid, mouse-wheel zoom around cursor (`0.25x` to `4.0x`), middle-click or `Space`+drag pan, drag-and-drop placement with a translucent grid-snapping ghost preview, movable components, `R` to rotate 90° CW, and `F` to flip horizontally.
-  - **Dockable Main Window & Palette (`src/circuitsim/app/main_window.py`, `palette_dock.py`, `themes.py`)**:
-    - Full Section 2 layout: menus, simulation toolbar, Saved Parts quick bar, left Component Palette dock with live search filter and collapsible categories, right Inspector dock, bottom Oscilloscope & Formulas dock, status bar with cursor grid coordinates, and instant Dark/Light theme switching (`Ctrl+T`).
-  - **Symbol Preview Tool (`src/circuitsim/tools/symbol_preview.py`)**:
-    - Standalone viewer (`python -m circuitsim.tools.symbol_preview`) and PNG exporter (`--export`) showing every symbol and state in both Dark and Light themes with the 20 px grid and terminal alignment dots overlaid.
+  - 11 IEC symbol JSON metadata files (`src/circuitsim/resources/symbols/iec/`), pure-Python symbol geometry & tolerant SVG loader (`src/circuitsim/canvas/symbol_geometry.py`), hybrid SVG/procedural IEC renderer (`symbol_renderer.py`), symbol preview tool (`tools/symbol_preview.py`), and dockable `MainWindow`.
+- **Milestone 2 — Step 2B: Connectivity Engine, Orthogonal Wiring, Full Undo/Redo & Usability**:
+  - **Pure-Python Connectivity & Netlist Extractor (`src/circuitsim/canvas/connectivity.py`, zero Qt imports)**:
+    - Union-Find netlist extractor (`extract_connectivity`, `CircuitScene.build_circuit()`) enforcing exact schematic connectivity rules:
+      1. Wire endpoints connect to component terminals only when sitting on them (or via an explicit junction dot). Crossing wires do **not** connect unless a T-junction (wire endpoint on another wire) or an explicit junction dot is present.
+      2. Deleting a component automatically deletes all wires attached to its terminals; moving, rotating, or flipping a component keeps attached wires connected and re-routes them at right angles (`reroute_wires_for_updated_terminals`).
+      3. Zero-length wires are discarded; duplicate and collinear overlapping wires are unified without creating phantom connections.
+  - **Interactive Orthogonal Wiring & Terminal Highlighting (`src/circuitsim/canvas/wire_item.py`, `scene.py`, `view.py`)**:
+    - Hovering near any component terminal highlights it with a glowing ring and switches to a crosshair cursor.
+    - Clicking and dragging (or click-to-click) from any terminal or in Wire Mode (`W`) shows a dashed live right-angle route preview and highlights the target terminal or wire snap point.
+    - Pressing `J` or right-clicking toggles an explicit junction dot at any grid point or wire crossing.
+  - **Full `QUndoStack` Editing (`src/circuitsim/canvas/commands.py`)**:
+    - Rubber-band box selection, single and group move, Rotate 90° CW (`R`), Flip Horizontal (`F`), Delete (`Del`/`Backspace`), Cut (`Ctrl+X`), Copy (`Ctrl+C`), Paste (`Ctrl+V`), and `QUndoStack` Undo/Redo (`Ctrl+Z`/`Ctrl+Y`) for every action.
+  - **Usability & Palette Improvements (`src/circuitsim/app/main_window.py`, `palette_dock.py`)**:
+    - Added Rotate (`R`), Flip (`F`), Wire Tool (`W`), Junction Dot (`J`), and Delete (`Del`) to the main toolbar and right-click context menu (along with Cut, Copy, Paste).
+    - When nothing is selected, the Properties / Info Panel displays the full Keyboard & Mouse Shortcuts reference; when a component is selected, it shows live resolved node names (`Node 0`, `Node N1`, ...) for each terminal.
+    - Compacted palette tree rows and ordered items logically (with `Voltmeter` first under `Instruments`) so all 11 Milestone 1 & 2 components are immediately visible without hiding behind a scrollbar.
 - **Unit Test Suite (`tests/`)**:
-  - **62 passing tests** (56 engine/physics tests + 6 symbol metadata, geometry, snapping, and tolerant SVG loader tests).
+  - **71 passing tests** (56 engine/physics tests + 6 symbol/SVG loader tests + 9 connectivity, netlist extraction, analytical comparison, and `QUndoStack` editing tests).
 
-### What Is Next (Milestone 2 — Remaining Steps)
-- **Step 2B**: Schematic editing and wiring — rubber-band box selection, Delete (`Del`/`Backspace`), Copy/Paste (`Ctrl+C`/`Ctrl+V`), `QUndoStack` Undo/Redo (`Ctrl+Z`/`Ctrl+Y`), click-and-drag right-angle wire routing between terminals, junction dots, and netlist extraction.
-- **Step 2C**: Live simulation loop (`QThread` worker behind a clean process-ready interface), Run/Pause/Stop controls, problem highlighting on canvas, clickable animated switch, glowing lightbulb, and live voltmeter/ammeter readouts.
-
-### Known Issues & Limitations
-- Wires cannot be drawn yet and the Run/Pause/Stop toolbar buttons are placeholders until Steps 2B and 2C.
+### What Is Next (Milestone 2 — Step 2C)
+- **Step 2C**: Background worker simulation loop (`QThread` behind a clean process-ready interface), Run/Pause/Stop controls, live problem highlighting on the canvas, clickable animated switch, glowing lightbulb following real dissipated power, and live voltmeter/ammeter readouts on the canvas.
 
 ### How to Run the App, Preview Tool, and Tests
 
@@ -46,6 +46,6 @@
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (62 tests)
+# Run the full test suite (71 tests)
 .\.venv\Scripts\pytest.exe
 ```

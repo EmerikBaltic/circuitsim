@@ -26,6 +26,24 @@ from circuitsim.canvas.scene import CircuitScene
 from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.view import CircuitView
 
+DEFAULT_SHORTCUTS_HELP_TEXT: str = (
+    "No component selected.\n\n"
+    "KEYBOARD & MOUSE SHORTCUTS:\n"
+    "• Place part: Drag from Palette (or double-click)\n"
+    "• Draw wire: Drag from any terminal (or press W)\n"
+    "• Cancel wire / Deselect: Esc (or Right-click)\n"
+    "• Toggle junction dot: J (at cursor) or Right-click\n"
+    "• Rotate 90° CW: R\n"
+    "• Flip horizontal: F\n"
+    "• Delete selection: Del or Backspace\n"
+    "• Cut / Copy / Paste: Ctrl+X / Ctrl+C / Ctrl+V\n"
+    "• Undo / Redo: Ctrl+Z / Ctrl+Y\n"
+    "• Box select: Left-drag on empty canvas\n"
+    "• Zoom: Mouse wheel (Ctrl++ / Ctrl+-)\n"
+    "• Pan canvas: Middle-drag or Space + Left-drag\n"
+    "• Toggle Dark/Light theme: Ctrl+T"
+)
+
 
 class MainWindow(QMainWindow):
     """Dockable main window for CircuitSim (Section 2 of specification)."""
@@ -72,23 +90,70 @@ class MainWindow(QMainWindow):
         act_exit.triggered.connect(self.close)
         file_menu.addAction(act_exit)
 
-        # Edit menu
+        # Edit menu (backed by QUndoStack)
         edit_menu = menu_bar.addMenu("&Edit")
-        self.act_undo = QAction("&Undo", self)
+        self.act_undo = self.circuit_scene.undo_stack.createUndoAction(
+            self, "&Undo"
+        )
         self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
-        self.act_redo = QAction("&Redo", self)
-        self.act_redo.setShortcut(QKeySequence.StandardKey.Redo)
+        self.act_redo = self.circuit_scene.undo_stack.createRedoAction(
+            self, "&Redo"
+        )
+        self.act_redo.setShortcuts(
+            [QKeySequence.StandardKey.Redo, QKeySequence("Ctrl+Y")]
+        )
         edit_menu.addAction(self.act_undo)
         edit_menu.addAction(self.act_redo)
+        edit_menu.addSeparator()
+
+        self.act_cut = QAction("Cu&t", self)
+        self.act_cut.setShortcut(QKeySequence.StandardKey.Cut)
+        self.act_cut.triggered.connect(self.circuit_scene.cut_selected)
+        edit_menu.addAction(self.act_cut)
+
+        self.act_copy = QAction("&Copy", self)
+        self.act_copy.setShortcut(QKeySequence.StandardKey.Copy)
+        self.act_copy.triggered.connect(self.circuit_scene.copy_selected)
+        edit_menu.addAction(self.act_copy)
+
+        self.act_paste = QAction("&Paste", self)
+        self.act_paste.setShortcut(QKeySequence.StandardKey.Paste)
+        self.act_paste.triggered.connect(self.circuit_scene.paste_clipboard)
+        edit_menu.addAction(self.act_paste)
+
+        self.act_delete = QAction("&Delete", self)
+        self.act_delete.setShortcut(QKeySequence.StandardKey.Delete)
+        self.act_delete.triggered.connect(self.circuit_scene.delete_selected)
+        edit_menu.addAction(self.act_delete)
 
         edit_menu.addSeparator()
-        act_rotate = QAction("&Rotate 90° CW (R)", self)
-        act_rotate.triggered.connect(self._rotate_selected)
-        edit_menu.addAction(act_rotate)
+        self.act_rotate = QAction("&Rotate (R)", self)
+        self.act_rotate.setToolTip("Rotate selected component(s) 90° clockwise (Shortcut: R)")
+        self.act_rotate.triggered.connect(self._rotate_selected)
+        edit_menu.addAction(self.act_rotate)
 
-        act_flip = QAction("&Flip Horizontal (F)", self)
-        act_flip.triggered.connect(self._flip_selected)
-        edit_menu.addAction(act_flip)
+        self.act_flip = QAction("&Flip (F)", self)
+        self.act_flip.setToolTip("Flip selected component(s) horizontally (Shortcut: F)")
+        self.act_flip.triggered.connect(self._flip_selected)
+        edit_menu.addAction(self.act_flip)
+
+        self.act_wire_mode = QAction("&Wire Tool (W)", self, checkable=True)
+        self.act_wire_mode.setToolTip(
+            "Toggle Wire Drawing mode (Shortcut: W). You can also drag directly from any terminal."
+        )
+        self.act_wire_mode.toggled.connect(self.circuit_view.set_wire_mode)
+        edit_menu.addAction(self.act_wire_mode)
+
+        self.act_junction = QAction("Toggle &Junction Dot (J)", self)
+        self.act_junction.setToolTip(
+            "Place or remove an explicit junction dot at the cursor (Shortcut: J)"
+        )
+        self.act_junction.triggered.connect(
+            lambda: self.circuit_scene.toggle_junction_at(
+                self.circuit_view._last_scene_pos
+            )
+        )
+        edit_menu.addAction(self.act_junction)
 
         # View menu
         view_menu = menu_bar.addMenu("&View")
@@ -98,6 +163,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_toggle_grid)
 
         self.act_toggle_theme = QAction("Switch to &Light Theme", self)
+        self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+T"))
         self.act_toggle_theme.triggered.connect(self.toggle_theme)
         view_menu.addAction(self.act_toggle_theme)
 
@@ -132,7 +198,7 @@ class MainWindow(QMainWindow):
         act_reload_svg.triggered.connect(self._reload_custom_svgs)
         help_menu.addAction(act_reload_svg)
 
-        # Main Toolbar
+        # Main Toolbar (with Undo/Redo, Rotate (R), Flip (F), Delete, Run/Pause/Stop)
         main_tb = QToolBar("Main Toolbar", self)
         main_tb.setMovable(False)
         main_tb.addAction(self.act_new)
@@ -141,6 +207,12 @@ class MainWindow(QMainWindow):
         main_tb.addSeparator()
         main_tb.addAction(self.act_undo)
         main_tb.addAction(self.act_redo)
+        main_tb.addSeparator()
+        main_tb.addAction(self.act_rotate)
+        main_tb.addAction(self.act_flip)
+        main_tb.addAction(self.act_wire_mode)
+        main_tb.addAction(self.act_junction)
+        main_tb.addAction(self.act_delete)
         main_tb.addSeparator()
         main_tb.addAction(self.act_run)
         main_tb.addAction(self.act_pause)
@@ -195,17 +267,12 @@ class MainWindow(QMainWindow):
         info_container = QWidget()
         info_layout = QVBoxLayout(info_container)
         info_layout.setContentsMargins(10, 10, 10, 10)
-        self.info_label = QLabel(
-            "Select a component on the canvas to inspect its properties.\n\n"
-            "• Drag parts from the left palette onto the grid.\n"
-            "• Scroll wheel to zoom, middle-click or Space+drag to pan.\n"
-            "• Press R to rotate or F to flip selected parts."
-        )
+        self.info_label = QLabel(DEFAULT_SHORTCUTS_HELP_TEXT)
         self.info_label.setWordWrap(True)
         self.info_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         info_layout.addWidget(self.info_label)
         self.info_dock.setWidget(info_container)
-        self.info_dock.setMinimumWidth(260)
+        self.info_dock.setMinimumWidth(275)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.info_dock)
 
         # 3. Bottom Dock: Oscilloscope Panel Placeholder
@@ -217,7 +284,7 @@ class MainWindow(QMainWindow):
         )
         scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         scope_layout.addWidget(scope_label)
-        scope_container.setMinimumHeight(110)
+        scope_container.setMinimumHeight(90)
         self.scope_dock.setWidget(scope_container)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.scope_dock)
 
@@ -229,7 +296,7 @@ class MainWindow(QMainWindow):
         sb = self.statusBar()
         self.status_coords = QLabel("Grid: (0, 0) | Pos: (0, 0) px")
         self.status_zoom = QLabel("Zoom: 100%")
-        self.status_counts = QLabel("Components: 0")
+        self.status_counts = QLabel("Components: 0 | Wires: 0")
         self.status_warnings = QLabel("Ready")
 
         sb.addWidget(self.status_coords)
@@ -245,6 +312,7 @@ class MainWindow(QMainWindow):
         self.circuit_view.zoom_changed.connect(self._on_zoom_changed)
         self.circuit_scene.component_placed.connect(self._on_component_placed)
         self.circuit_scene.selection_info_changed.connect(self._update_info_panel)
+        self.circuit_scene.circuit_modified.connect(self._on_circuit_modified)
 
     def apply_theme(self, theme: ThemeMode) -> None:
         """Apply `theme` ('dark' or 'light') across window, palette, and canvas."""
@@ -279,16 +347,22 @@ class MainWindow(QMainWindow):
         self.circuit_scene.place_new_component(component_id, QPointF(center_pt))
 
     def _rotate_selected(self) -> None:
-        for item in self.circuit_scene.selectedItems():
-            if isinstance(item, ComponentItem):
-                item.rotate_90_cw()
-                self._update_info_panel(item)
+        if self.circuit_scene.rotate_selected():
+            selected = [
+                it
+                for it in self.circuit_scene.selectedItems()
+                if isinstance(it, ComponentItem)
+            ]
+            self._update_info_panel(selected[0] if selected else None)
 
     def _flip_selected(self) -> None:
-        for item in self.circuit_scene.selectedItems():
-            if isinstance(item, ComponentItem):
-                item.flip_horizontal()
-                self._update_info_panel(item)
+        if self.circuit_scene.flip_selected():
+            selected = [
+                it
+                for it in self.circuit_scene.selectedItems()
+                if isinstance(it, ComponentItem)
+            ]
+            self._update_info_panel(selected[0] if selected else None)
 
     def _on_cursor_moved(self, x_px: float, y_px: float, gx: int, gy: int) -> None:
         self.status_coords.setText(
@@ -299,11 +373,23 @@ class MainWindow(QMainWindow):
         self.status_zoom.setText(f"Zoom: {int(round(zoom * 100.0))}%")
 
     def _on_component_placed(self, item: ComponentItem) -> None:
-        self.status_counts.setText(
-            f"Components: {len(self.circuit_scene.placed_items)}"
-        )
+        self._update_status_counts()
         self._update_info_panel(item)
         self._refresh_warnings_display()
+
+    def _on_circuit_modified(self) -> None:
+        self._update_status_counts()
+        selected = [
+            it
+            for it in self.circuit_scene.selectedItems()
+            if isinstance(it, ComponentItem)
+        ]
+        self._update_info_panel(selected[0] if selected else None)
+
+    def _update_status_counts(self) -> None:
+        n_comp = len(self.circuit_scene.placed_items)
+        n_wire = len(self.circuit_scene.placed_wires)
+        self.status_counts.setText(f"Components: {n_comp} | Wires: {n_wire}")
 
     def _refresh_warnings_display(self) -> None:
         if self.symbol_library.warnings:
@@ -313,23 +399,19 @@ class MainWindow(QMainWindow):
             self.status_warnings.setText("Ready (IEC Symbols)")
 
     def _update_info_panel(self, item: ComponentItem | None) -> None:
-        self.status_counts.setText(
-            f"Components: {len(self.circuit_scene.placed_items)}"
-        )
+        self._update_status_counts()
         if item is None:
-            self.info_label.setText(
-                "No component selected.\n\n"
-                "• Drag a part from the Component Palette onto the canvas.\n"
-                "• Click a part on the canvas to inspect its details."
-            )
+            self.info_label.setText(DEFAULT_SHORTCUTS_HELP_TEXT)
             return
 
         comp = item.component
         meta = item.metadata
         val_str = format_component_value_summary(comp) or "—"
         terms = item.terminal_scene_positions()
+        conn_res = self.circuit_scene.extract_connectivity_result()
+        node_map = conn_res.component_nodes.get(comp.name, {})
         term_lines = "\n".join(
-            f"  • {t_name}: ({int(pos[0])}, {int(pos[1])}) px"
+            f"  • {t_name}: ({int(pos[0])}, {int(pos[1])}) px  →  Node {node_map.get(t_name, '?')}"
             for t_name, pos in terms.items()
         )
         svg_path = meta.svg_path_for_state(item.symbol_state)
@@ -348,5 +430,5 @@ class MainWindow(QMainWindow):
             f"Rotation: {item.rotation_deg}° | Flipped: {item.flipped_h}\n"
             f"Footprint: {meta.grid_size[0]}x{meta.grid_size[1]} grid ({meta.pixel_size[0]}x{meta.pixel_size[1]} px)\n"
             f"Symbol Source: {source_kind}\n\n"
-            f"Terminals:\n{term_lines}"
+            f"Terminals & Nets:\n{term_lines}"
         )
