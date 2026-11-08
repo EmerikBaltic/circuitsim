@@ -10,7 +10,7 @@ Items covered:
 from __future__ import annotations
 
 import os
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QDockWidget, QToolBar
 
@@ -90,3 +90,117 @@ def test_2_no_fake_oscilloscope() -> None:
         assert "Oscilloscope (4-Channel)" not in current_titles
     finally:
         win.close()
+
+
+def test_3_lowest_free_number_for_component_names(tmp_path) -> None:
+    """Verify lowest free number assignment across add, delete, paste, undo, redo, and save/load."""
+    _get_qapp()
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    from circuitsim.canvas.scene import CircuitScene
+    from circuitsim.io.circ_serializer import save_document, load_document
+
+    lib = SymbolLibrary()
+    scene = CircuitScene(lib)
+
+    # 1. Prefix checks
+    prefixes_to_test = [
+        ("resistor", "R1"),
+        ("capacitor", "C1"),
+        ("inductor", "L1"),
+        ("dc_voltage", "V1"),
+        ("voltmeter", "VM1"),
+        ("ammeter", "A1"),
+        ("lightbulb", "B1"),
+        ("switch", "SW1"),
+        ("ground", "GND1"),
+    ]
+    items = {}
+    x = 0
+    for comp_id, expected_name in prefixes_to_test:
+        it = scene.place_new_component(comp_id, QPointF(x, 0))
+        assert it.component.name == expected_name
+        items[comp_id] = it
+        x += 100
+
+    # Add a second voltmeter: VM2
+    vm2 = scene.place_new_component("voltmeter", QPointF(x, 0))
+    assert vm2.component.name == "VM2"
+
+    # Current names stay unique
+    names_before = [it.component.name for it in scene.placed_items]
+    assert len(names_before) == len(set(names_before))
+
+    # 2. Delete VM1
+    vm1 = items["voltmeter"]
+    scene.clearSelection()
+    vm1.setSelected(True)
+    assert scene.delete_selected()
+
+    # VM1 is gone, VM2 remains
+    remaining_names = [it.component.name for it in scene.placed_items]
+    assert "VM1" not in remaining_names
+    assert "VM2" in remaining_names
+
+    # Adding a meter gives VM1 again (lowest free number)
+    vm1_new = scene.place_new_component("voltmeter", QPointF(x + 100, 0))
+    assert vm1_new.component.name == "VM1"
+
+    # 3. Pasting gets lowest free number too
+    scene.clearSelection()
+    vm2.setSelected(True)
+    assert scene.copy_selected()
+    assert scene.paste_clipboard()
+
+    pasted_vm = [it for it in scene.placed_items if it not in (vm1_new, vm2) and it.component.component_type == "voltmeter"][0]
+    assert pasted_vm.component.name == "VM3"
+
+    # Verify names remain unique
+    names_with_paste = [it.component.name for it in scene.placed_items]
+    assert len(names_with_paste) == len(set(names_with_paste))
+
+    # 4. Undo / Redo sequence
+    # Undo paste -> VM3 gone
+    scene.undo_stack.undo()
+    assert "VM3" not in [it.component.name for it in scene.placed_items]
+
+    # Undo add vm1_new -> VM1 gone, only VM2 remains
+    scene.undo_stack.undo()
+    assert "VM1" not in [it.component.name for it in scene.placed_items]
+    assert "VM2" in [it.component.name for it in scene.placed_items]
+
+    # Undo delete vm1 -> original VM1 is restored!
+    scene.undo_stack.undo()
+    names_restored = [it.component.name for it in scene.placed_items]
+    assert "VM1" in names_restored
+    assert "VM2" in names_restored
+    assert len(names_restored) == len(set(names_restored))
+
+    # Redo delete -> VM1 deleted again
+    scene.undo_stack.redo()
+    assert "VM1" not in [it.component.name for it in scene.placed_items]
+
+    # Redo add -> vm1_new re-added
+    scene.undo_stack.redo()
+    assert "VM1" in [it.component.name for it in scene.placed_items]
+
+    # Redo paste -> VM3 re-added
+    scene.undo_stack.redo()
+    assert "VM3" in [it.component.name for it in scene.placed_items]
+
+    # 5. Save / Load round trip keeps names
+    save_file = tmp_path / "test_names.circ"
+    doc = scene.to_document()
+    save_document(save_file, doc)
+
+    loaded_doc = load_document(save_file)
+    scene2 = CircuitScene(lib)
+    scene2.load_document(loaded_doc)
+
+    loaded_names = [it.component.name for it in scene2.placed_items]
+    assert set(loaded_names) == set(names_with_paste)
+    assert "VM1" in loaded_names and "VM2" in loaded_names and "VM3" in loaded_names
+
+    # After loading, next added meter gets lowest free number (VM4)
+    vm4 = scene2.place_new_component("voltmeter", QPointF(x + 200, 0))
+    assert vm4.component.name == "VM4"
+

@@ -163,14 +163,17 @@ class CircuitScene(QGraphicsScene):
         self.show_grid = bool(visible)
         self.update()
 
-    def next_component_name(self, component_id: str) -> str:
-        """Generate the next sequential designator (e.g. 'R1', 'R2', 'C1')."""
-        prefix = COMPONENT_PREFIXES.get(component_id, "U")
+    def next_component_name(
+        self, component_id: str, extra_taken: set[str] | None = None
+    ) -> str:
+        """Generate the lowest unused sequential designator for the prefix (e.g. 'R1', 'VM1')."""
+        prefix = COMPONENT_PREFIXES.get(component_id, component_id)
         existing_names = {it.component.name for it in self._placed_items}
-        count = self._counters.get(prefix, 0) + 1
+        if extra_taken:
+            existing_names.update(extra_taken)
+        count = 1
         while f"{prefix}{count}" in existing_names:
             count += 1
-        self._counters[prefix] = count
         return f"{prefix}{count}"
 
     def next_wire_id(self) -> str:
@@ -831,9 +834,13 @@ class CircuitScene(QGraphicsScene):
             dx, dy = snap_to_grid(offset_px[0], offset_px[1], GRID_PITCH_PX)
 
         new_comps: list[ComponentItem] = []
+        assigned_names: set[str] = set()
         for entry in self._clipboard.components:
             cloned = copy.deepcopy(entry.component_snapshot)
-            new_name = self.next_component_name(cloned.component_type)
+            new_name = self.next_component_name(
+                cloned.component_type, extra_taken=assigned_names
+            )
+            assigned_names.add(new_name)
             cloned.name = new_name
             cloned.label = new_name
             item = ComponentItem(
