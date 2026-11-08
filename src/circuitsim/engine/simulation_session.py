@@ -59,6 +59,122 @@ class SimulationState(str, Enum):
     ERROR = "error"
 
 
+@dataclass(frozen=True)
+class TransportControlsViewState:
+    """Pure-Python specification of Run / Pause / Stop toolbar & status bar visual states."""
+
+    sim_state: SimulationState
+    run_enabled: bool
+    run_label: str
+    run_icon_text: str
+    run_tooltip: str
+    run_visual_role: str  # "normal", "active_green", or "error_red"
+    pause_enabled: bool
+    pause_label: str
+    pause_icon_text: str
+    pause_tooltip: str
+    pause_visual_role: str  # "disabled", "normal", or "active_amber"
+    stop_enabled: bool
+    stop_label: str
+    stop_icon_text: str
+    stop_tooltip: str
+    status_indicator_text: str  # "● Running", "❚❚ Paused", or "■ Stopped"
+    status_indicator_role: str  # "running", "paused", "stopped", or "error"
+
+
+def compute_transport_controls_state(
+    state: SimulationState,
+    *,
+    error_reason: str = "",
+) -> TransportControlsViewState:
+    """Pure-Python mapping from `SimulationState` to Run/Pause/Stop UI controls."""
+    if state == SimulationState.RUNNING:
+        return TransportControlsViewState(
+            sim_state=state,
+            run_enabled=True,
+            run_label="▶ &Run",
+            run_icon_text="▶ Run",
+            run_tooltip="Simulation is running (Shortcut: F5)",
+            run_visual_role="active_green",
+            pause_enabled=True,
+            pause_label="⏸ &Pause",
+            pause_icon_text="⏸ Pause",
+            pause_tooltip="Pause circuit simulation (Shortcut: F6)",
+            pause_visual_role="normal",
+            stop_enabled=True,
+            stop_label="⏹ &Stop",
+            stop_icon_text="⏹ Stop",
+            stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+            status_indicator_text="● Running",
+            status_indicator_role="running",
+        )
+    if state == SimulationState.PAUSED:
+        return TransportControlsViewState(
+            sim_state=state,
+            run_enabled=True,
+            run_label="▶ &Resume",
+            run_icon_text="▶ Resume",
+            run_tooltip="Resume paused circuit simulation (Shortcut: F5)",
+            run_visual_role="normal",
+            pause_enabled=True,
+            pause_label="⏸ &Pause",
+            pause_icon_text="⏸ Pause",
+            pause_tooltip="Simulation is paused (Shortcut: F6)",
+            pause_visual_role="active_amber",
+            stop_enabled=True,
+            stop_label="⏹ &Stop",
+            stop_icon_text="⏹ Stop",
+            stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+            status_indicator_text="❚❚ Paused",
+            status_indicator_role="paused",
+        )
+    if state == SimulationState.ERROR:
+        tip = (
+            f"Cannot run ({error_reason}) — click to retry (Shortcut: F5)"
+            if error_reason
+            else "Cannot run due to circuit error — click to retry (Shortcut: F5)"
+        )
+        return TransportControlsViewState(
+            sim_state=state,
+            run_enabled=True,
+            run_label="▶ &Run",
+            run_icon_text="▶ Run",
+            run_tooltip=tip,
+            run_visual_role="error_red",
+            pause_enabled=False,
+            pause_label="⏸ &Pause",
+            pause_icon_text="⏸ Pause",
+            pause_tooltip="Pause circuit simulation (Shortcut: F6)",
+            pause_visual_role="disabled",
+            stop_enabled=False,
+            stop_label="⏹ &Stop",
+            stop_icon_text="⏹ Stop",
+            stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+            status_indicator_text="■ Stopped",
+            status_indicator_role="error",
+        )
+    # Default: SimulationState.STOPPED
+    return TransportControlsViewState(
+        sim_state=SimulationState.STOPPED,
+        run_enabled=True,
+        run_label="▶ &Run",
+        run_icon_text="▶ Run",
+        run_tooltip="Start circuit simulation (Shortcut: F5)",
+        run_visual_role="normal",
+        pause_enabled=False,
+        pause_label="⏸ &Pause",
+        pause_icon_text="⏸ Pause",
+        pause_tooltip="Pause circuit simulation (Shortcut: F6)",
+        pause_visual_role="disabled",
+        stop_enabled=False,
+        stop_label="⏹ &Stop",
+        stop_icon_text="⏹ Stop",
+        stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+        status_indicator_text="■ Stopped",
+        status_indicator_role="stopped",
+    )
+
+
 class SimulationSpeed(str, Enum):
     """Target simulation speed relative to wall-clock time."""
 

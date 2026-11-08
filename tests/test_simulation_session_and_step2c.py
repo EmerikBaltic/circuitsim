@@ -33,6 +33,7 @@ from circuitsim.engine import (
     Circuit,
     SimulationSession,
     SimulationState,
+    compute_transport_controls_state,
 )
 
 
@@ -40,6 +41,51 @@ def test_simulation_session_has_zero_qt_imports() -> None:
     """Verify `circuitsim.engine.simulation_session` imports zero PySide6 modules."""
     qt_mods = [m for m in sys.modules if m.startswith("PySide6")]
     assert qt_mods == []
+
+
+def test_transport_controls_state_mapping_and_transitions() -> None:
+    """Item 3: Pure-Python mapping from SimulationState to Run/Pause/Stop button states."""
+    # 1. STOPPED: Run enabled; Pause and Stop greyed out; indicator '■ Stopped'
+    s_stopped = compute_transport_controls_state(SimulationState.STOPPED)
+    assert s_stopped.run_enabled is True
+    assert s_stopped.pause_enabled is False
+    assert s_stopped.stop_enabled is False
+    assert s_stopped.run_visual_role == "normal"
+    assert s_stopped.status_indicator_text == "■ Stopped"
+    assert "F5" in s_stopped.run_tooltip
+    assert "F6" in s_stopped.pause_tooltip
+    assert "F7" in s_stopped.stop_tooltip
+
+    # 2. RUNNING: Run shown as active (green); Pause and Stop enabled; indicator '● Running'
+    s_running = compute_transport_controls_state(SimulationState.RUNNING)
+    assert s_running.run_enabled is True
+    assert s_running.pause_enabled is True
+    assert s_running.stop_enabled is True
+    assert s_running.run_visual_role == "active_green"
+    assert s_running.pause_visual_role == "normal"
+    assert s_running.status_indicator_text == "● Running"
+
+    # 3. PAUSED: Pause shown as active (amber); Run enabled and labelled 'Resume'; Stop enabled; indicator '❚❚ Paused'
+    s_paused = compute_transport_controls_state(SimulationState.PAUSED)
+    assert s_paused.run_enabled is True
+    assert "Resume" in s_paused.run_label
+    assert "Resume" in s_paused.run_icon_text
+    assert s_paused.pause_enabled is True
+    assert s_paused.pause_visual_role == "active_amber"
+    assert s_paused.stop_enabled is True
+    assert s_paused.status_indicator_text == "❚❚ Paused"
+
+    # 4. ERROR: Run shows red outline; Pause and Stop disabled; indicator '■ Stopped'
+    s_error = compute_transport_controls_state(
+        SimulationState.ERROR, error_reason="No ground connected"
+    )
+    assert s_error.run_enabled is True
+    assert s_error.run_visual_role == "error_red"
+    assert s_error.pause_enabled is False
+    assert s_error.stop_enabled is False
+    assert s_error.status_indicator_text == "■ Stopped"
+    assert s_error.status_indicator_role == "error"
+    assert "No ground connected" in s_error.run_tooltip
 
 
 def test_meters_show_dash_before_simulation_and_after_stop() -> None:
@@ -398,6 +444,24 @@ win.resize(1024, 768)
 win.show()
 app.processEvents()
 assert win.speed_combo.isVisible(), "Speed dropdown must be visible on toolbar without overflowing"
+
+# 2b. Verify real toolbar actions and status bar state indicator match pure-Python mapping (Item 3)
+from circuitsim.engine.simulation_session import SimulationState, compute_transport_controls_state
+for state in (SimulationState.STOPPED, SimulationState.RUNNING, SimulationState.PAUSED, SimulationState.ERROR):
+    expected_ui = compute_transport_controls_state(state, error_reason="No ground connected")
+    win._sim_state = state
+    win._apply_transport_controls_ui(state, error_reason="No ground connected")
+    assert win.act_run.isEnabled() == expected_ui.run_enabled
+    assert win.act_pause.isEnabled() == expected_ui.pause_enabled
+    assert win.act_stop.isEnabled() == expected_ui.stop_enabled
+    assert win.act_run.iconText() == expected_ui.run_icon_text
+    assert win.status_state_indicator.text() == expected_ui.status_indicator_text
+    # Also verify theme switching keeps the state indicator and button styles intact
+    win.toggle_theme()
+    assert win.status_state_indicator.text() == expected_ui.status_indicator_text
+    win.toggle_theme()
+win._sim_state = SimulationState.STOPPED
+win._apply_transport_controls_ui(SimulationState.STOPPED)
 
 # 3. Verify QuickValueDialog validation, live preview, and readable error message (Addition #1 & Item 2)
 res = Resistor("R1", "a", "b", resistance=1000.0)

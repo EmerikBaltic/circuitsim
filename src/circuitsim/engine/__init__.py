@@ -17,6 +17,8 @@ from circuitsim.engine.simulation_session import (
     SimulationSession,
     SimulationSpeed,
     SimulationState,
+    TransportControlsViewState,
+    compute_transport_controls_state,
 )
 from circuitsim.engine.solver import (
     IntegrationMethod,
@@ -43,5 +45,7 @@ __all__ = [
     "SingularMatrixError",
     "SolveResult",
     "TransientResult",
+    "TransportControlsViewState",
     "VoltageSourceLoopError",
+    "compute_transport_controls_state",
 ]

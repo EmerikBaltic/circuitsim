@@ -32,6 +32,8 @@ from circuitsim.engine.simulation_session import (
     SimulationFrame,
     SimulationSpeed,
     SimulationState,
+    TransportControlsViewState,
+    compute_transport_controls_state,
 )
 
 DEFAULT_SHORTCUTS_HELP_TEXT: str = (
@@ -72,6 +74,7 @@ class MainWindow(QMainWindow):
 
         self.sim_controller = SimulationWorkerController(self)
         self._sim_state: SimulationState = SimulationState.STOPPED
+        self._last_error_reason: str = ""
 
         self._build_menus_and_toolbars()
         self._build_saved_parts_bar()
@@ -93,11 +96,13 @@ class MainWindow(QMainWindow):
 
         self.act_open = QAction("&Open...", self)
         self.act_open.setIconText("Open")
+        self.act_open.setToolTip("Open a saved circuit file (Ctrl+O)")
         self.act_open.setShortcut(QKeySequence.StandardKey.Open)
         file_menu.addAction(self.act_open)
 
         self.act_save = QAction("&Save...", self)
         self.act_save.setIconText("Save")
+        self.act_save.setToolTip("Save current circuit to file (Ctrl+S)")
         self.act_save.setShortcut(QKeySequence.StandardKey.Save)
         file_menu.addAction(self.act_save)
 
@@ -113,34 +118,40 @@ class MainWindow(QMainWindow):
             self, "&Undo"
         )
         self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        self.act_undo.setToolTip("Undo last action (Shortcut: Ctrl+Z)")
         self.act_redo = self.circuit_scene.undo_stack.createRedoAction(
             self, "&Redo"
         )
         self.act_redo.setShortcuts(
             [QKeySequence.StandardKey.Redo, QKeySequence("Ctrl+Y")]
         )
+        self.act_redo.setToolTip("Redo last undone action (Shortcut: Ctrl+Y)")
         edit_menu.addAction(self.act_undo)
         edit_menu.addAction(self.act_redo)
         edit_menu.addSeparator()
 
         self.act_cut = QAction("Cu&t", self)
         self.act_cut.setShortcut(QKeySequence.StandardKey.Cut)
+        self.act_cut.setToolTip("Cut selected items (Shortcut: Ctrl+X)")
         self.act_cut.triggered.connect(self.circuit_scene.cut_selected)
         edit_menu.addAction(self.act_cut)
 
         self.act_copy = QAction("&Copy", self)
         self.act_copy.setShortcut(QKeySequence.StandardKey.Copy)
+        self.act_copy.setToolTip("Copy selected items (Shortcut: Ctrl+C)")
         self.act_copy.triggered.connect(self.circuit_scene.copy_selected)
         edit_menu.addAction(self.act_copy)
 
         self.act_paste = QAction("&Paste", self)
         self.act_paste.setShortcut(QKeySequence.StandardKey.Paste)
+        self.act_paste.setToolTip("Paste copied items (Shortcut: Ctrl+V)")
         self.act_paste.triggered.connect(self.circuit_scene.paste_clipboard)
         edit_menu.addAction(self.act_paste)
 
         self.act_delete = QAction("&Delete", self)
         self.act_delete.setIconText("Del")
         self.act_delete.setShortcut(QKeySequence.StandardKey.Delete)
+        self.act_delete.setToolTip("Delete selected items and attached wires (Shortcut: Del)")
         self.act_delete.triggered.connect(self.circuit_scene.delete_selected)
         edit_menu.addAction(self.act_delete)
 
@@ -192,6 +203,7 @@ class MainWindow(QMainWindow):
 
         self.act_toggle_theme = QAction("Light &Theme", self)
         self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+T"))
+        self.act_toggle_theme.setToolTip("Toggle between Dark and Light themes (Shortcut: Ctrl+T)")
         self.act_toggle_theme.triggered.connect(self.toggle_theme)
         view_menu.addAction(self.act_toggle_theme)
 
@@ -214,17 +226,17 @@ class MainWindow(QMainWindow):
         sim_menu = menu_bar.addMenu("&Simulation")
         self.act_run = QAction("▶ &Run", self)
         self.act_run.setShortcut(QKeySequence("F5"))
-        self.act_run.setToolTip("Start or resume circuit simulation (F5)")
+        self.act_run.setToolTip("Start circuit simulation (Shortcut: F5)")
         self.act_run.triggered.connect(self.start_simulation)
 
         self.act_pause = QAction("⏸ &Pause", self)
         self.act_pause.setShortcut(QKeySequence("F6"))
-        self.act_pause.setToolTip("Pause circuit simulation (F6)")
+        self.act_pause.setToolTip("Pause circuit simulation (Shortcut: F6)")
         self.act_pause.triggered.connect(self.pause_simulation)
 
         self.act_stop = QAction("⏹ &Stop", self)
         self.act_stop.setShortcut(QKeySequence("F7"))
-        self.act_stop.setToolTip("Stop simulation and reset meters/states (F7)")
+        self.act_stop.setToolTip("Stop simulation and reset meters/states (Shortcut: F7)")
         self.act_stop.triggered.connect(self.stop_simulation)
 
         sim_menu.addAction(self.act_run)
@@ -257,8 +269,12 @@ class MainWindow(QMainWindow):
         main_tb.addAction(self.act_run)
         main_tb.addAction(self.act_pause)
         main_tb.addAction(self.act_stop)
+        self.btn_run = main_tb.widgetForAction(self.act_run)
+        self.btn_pause = main_tb.widgetForAction(self.act_pause)
+        self.btn_stop = main_tb.widgetForAction(self.act_stop)
         main_tb.addWidget(QLabel(" Speed:"))
         self.speed_combo = QComboBox()
+        self.speed_combo.setToolTip("Select simulation speed relative to real time")
         self.speed_combo.addItem("1x Real-Time", SimulationSpeed.REAL_TIME.value)
         self.speed_combo.addItem("0.1x Slow", SimulationSpeed.SLOW_MOTION.value)
         self.speed_combo.addItem("10x Fast", SimulationSpeed.FAST.value)
@@ -342,12 +358,14 @@ class MainWindow(QMainWindow):
 
     def _build_status_bar(self) -> None:
         sb = self.statusBar()
+        self.status_state_indicator = QLabel("■ Stopped")
         self.status_coords = QLabel("Grid: (0, 0) | Pos: (0, 0) px")
         self.status_sim = QLabel("Sim: Stopped (t = 0 s)")
         self.status_counts = QLabel("Components: 0 | Wires: 0")
         self.status_zoom = QLabel("Zoom: 100%")
         self.status_warnings = QLabel("Ready")
 
+        sb.addWidget(self.status_state_indicator)
         sb.addWidget(self.status_coords)
         sb.addPermanentWidget(self.status_sim)
         sb.addPermanentWidget(self.status_counts)
@@ -398,6 +416,79 @@ class MainWindow(QMainWindow):
         """Pause the running simulation."""
         self.sim_controller.pause()
 
+    def _apply_transport_controls_ui(
+        self,
+        state: SimulationState,
+        *,
+        error_reason: str = "",
+    ) -> TransportControlsViewState:
+        """Apply pure-Python `TransportControlsViewState` to toolbar actions, buttons, and status bar."""
+        ui = compute_transport_controls_state(state, error_reason=error_reason)
+        self._last_error_reason = error_reason
+
+        self.act_run.setEnabled(ui.run_enabled)
+        self.act_run.setText(ui.run_label)
+        self.act_run.setIconText(ui.run_icon_text)
+        self.act_run.setToolTip(ui.run_tooltip)
+
+        self.act_pause.setEnabled(ui.pause_enabled)
+        self.act_pause.setText(ui.pause_label)
+        self.act_pause.setIconText(ui.pause_icon_text)
+        self.act_pause.setToolTip(ui.pause_tooltip)
+
+        self.act_stop.setEnabled(ui.stop_enabled)
+        self.act_stop.setText(ui.stop_label)
+        self.act_stop.setIconText(ui.stop_icon_text)
+        self.act_stop.setToolTip(ui.stop_tooltip)
+
+        is_dark = self.theme == ThemeMode.DARK
+        green_fg = "#3FB950" if is_dark else "#1A7F37"
+        amber_fg = "#D29922" if is_dark else "#9A6700"
+        red_fg = "#FF6B6B" if is_dark else "#CF222E"
+        muted_fg = "#8B949E" if is_dark else "#57606A"
+
+        if self.btn_run is not None:
+            if ui.run_visual_role == "active_green":
+                self.btn_run.setStyleSheet(
+                    f"background-color: rgba(46, 160, 67, 0.22); "
+                    f"border: 2px solid {green_fg}; color: {green_fg}; font-weight: 700;"
+                )
+            elif ui.run_visual_role == "error_red":
+                self.btn_run.setStyleSheet(
+                    f"border: 2px solid {red_fg}; color: {red_fg}; font-weight: 700;"
+                )
+            else:
+                self.btn_run.setStyleSheet("")
+
+        if self.btn_pause is not None:
+            if ui.pause_visual_role == "active_amber":
+                self.btn_pause.setStyleSheet(
+                    f"background-color: rgba(210, 153, 34, 0.22); "
+                    f"border: 2px solid {amber_fg}; color: {amber_fg}; font-weight: 700;"
+                )
+            else:
+                self.btn_pause.setStyleSheet("")
+
+        self.status_state_indicator.setText(ui.status_indicator_text)
+        if ui.status_indicator_role == "running":
+            self.status_state_indicator.setStyleSheet(
+                f"color: {green_fg}; font-weight: 700; padding: 0 6px;"
+            )
+        elif ui.status_indicator_role == "paused":
+            self.status_state_indicator.setStyleSheet(
+                f"color: {amber_fg}; font-weight: 700; padding: 0 6px;"
+            )
+        elif ui.status_indicator_role == "error":
+            self.status_state_indicator.setStyleSheet(
+                f"color: {red_fg}; font-weight: 700; padding: 0 6px;"
+            )
+        else:
+            self.status_state_indicator.setStyleSheet(
+                f"color: {muted_fg}; font-weight: 600; padding: 0 6px;"
+            )
+
+        return ui
+
     def stop_simulation(self) -> None:
         """Stop simulation and reset meters/states back to t = 0."""
         self.sim_controller.stop()
@@ -405,6 +496,7 @@ class MainWindow(QMainWindow):
         for item in self.circuit_scene.placed_items:
             item.reset_live_telemetry()
         self._sim_state = SimulationState.STOPPED
+        self._apply_transport_controls_ui(SimulationState.STOPPED)
         self.status_sim.setText("Sim: Stopped (t = 0 s)")
         self._refresh_warnings_display()
 
@@ -435,6 +527,10 @@ class MainWindow(QMainWindow):
         self._sim_state = frame.state
         self.circuit_scene.apply_simulation_frame(frame)
 
+        errors = [d for d in frame.diagnostics if d.severity == "error"]
+        err_msg = errors[0].message if errors else ""
+        self._apply_transport_controls_ui(frame.state, error_reason=err_msg)
+
         t_str = format_engineering_value(frame.sim_time, "s", sig_figs=3)
         dt_str = format_engineering_value(frame.dt, "s", sig_figs=3)
         if frame.state == SimulationState.RUNNING:
@@ -452,7 +548,6 @@ class MainWindow(QMainWindow):
 
         if frame.diagnostics:
             # Show most severe diagnostic in status bar
-            errors = [d for d in frame.diagnostics if d.severity == "error"]
             top_diag = errors[0] if errors else frame.diagnostics[0]
             if top_diag.severity == "error":
                 self.status_warnings.setStyleSheet(
@@ -489,6 +584,9 @@ class MainWindow(QMainWindow):
             self.act_toggle_theme.setText("Dark &Theme")
         self.act_toggle_theme.setIconText("Theme")
 
+        self._apply_transport_controls_ui(
+            self._sim_state, error_reason=self._last_error_reason
+        )
         self._refresh_warnings_display()
 
     def toggle_theme(self) -> None:
