@@ -290,10 +290,10 @@ class SymbolLibrary:
 
             # The letter ('V' or 'A') must stay upright regardless of rotation or flip
             painter.save()
-            if rotation_deg:
-                painter.rotate(-float(rotation_deg))
             if flipped_h:
                 painter.scale(-1.0, 1.0)
+            if rotation_deg:
+                painter.rotate(-float(rotation_deg))
 
             if component_id == "voltmeter":
                 painter.drawLine(QPointF(-5.0, -6.0), QPointF(0.0, 6.0))

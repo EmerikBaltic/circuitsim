@@ -468,10 +468,10 @@ class ComponentItem(QGraphicsObject):
 
         # 2. Rotated/flipped symbol and selection/problem frame
         painter.save()
-        if self.flipped_h:
-            painter.scale(-1.0, 1.0)
         if self.rotation_deg:
             painter.rotate(float(self.rotation_deg))
+        if self.flipped_h:
+            painter.scale(-1.0, 1.0)
 
         if self.is_ghost:
             pen = QPen(QColor(palette.ghost_tint), 1.5, Qt.PenStyle.DashLine)
