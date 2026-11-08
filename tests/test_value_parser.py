@@ -16,6 +16,11 @@ from circuitsim.dialogs.value_parser import (
     ("raw_text", "expected"),
     [
         ("4.7k", 4.7e3),
+        ("4,7k", 4.7e3),
+        ("4.7 k", 4.7e3),
+        ("5,65 G", 5.65e9),
+        ("5.65 G", 5.65e9),
+        ("10K", 10e3),
         ("100n", 100e-9),
         ("2.2u", 2.2e-6),
         ("2.2µ", 2.2e-6),
@@ -36,7 +41,7 @@ from circuitsim.dialogs.value_parser import (
     ],
 )
 def test_parse_engineering_value_valid(raw_text: str, expected: float) -> None:
-    """Verify required specification strings and case-sensitive prefixes."""
+    """Verify required specification strings, decimal commas, spaces, and 'K'."""
     result = parse_engineering_value(raw_text)
     assert math.isclose(result, expected, rel_tol=1e-12, abs_tol=1e-18)
 
@@ -59,9 +64,10 @@ def test_case_sensitive_milli_vs_mega() -> None:
         "",
         "   ",
         "abc",
+        "1,234.5",
+        "1,2,3",
         "4.7Q",
-        "10K",  # Uppercase 'K' is rejected in strict case-sensitive app mode
-        "10P",
+        "10P",  # 'P' remains invalid because pico vs peta is ambiguous
         "--5k",
         "4.7.2k",
         "k4.7",
@@ -71,9 +77,13 @@ def test_case_sensitive_milli_vs_mega() -> None:
     ],
 )
 def test_parse_engineering_value_invalid(invalid_input: str | float) -> None:
-    """Verify malformed or out-of-spec strings raise ValueError."""
-    with pytest.raises(ValueError):
+    """Verify malformed or ambiguous strings raise ValueError with plain-language message."""
+    with pytest.raises(ValueError) as exc_info:
         parse_engineering_value(invalid_input)
+    msg = str(exc_info.value)
+    assert "Invalid engineering value format" not in msg
+    assert "Couldn't read" in msg
+    assert "prefixes: p n u m k M G" in msg
 
 
 def test_parse_spice_value_compatibility() -> None:
@@ -88,6 +98,7 @@ def test_parse_spice_value_compatibility() -> None:
 def test_format_engineering_value() -> None:
     """Verify human-readable engineering formatting with auto-ranging prefixes."""
     assert format_engineering_value(4700.0, "Ω") == "4.7 kΩ"
+    assert format_engineering_value(5.65e9, "Ω") == "5.65 GΩ"
     assert format_engineering_value(0.015, "A") == "15 mA"
     assert format_engineering_value(-0.0022, "V") == "-2.2 mV"
     assert format_engineering_value(0.0, "V") == "0 V"

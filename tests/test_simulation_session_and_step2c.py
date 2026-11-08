@@ -208,7 +208,7 @@ def test_component_editable_parameters_validation() -> None:
     r.set_parameter_value("resistance", "4.7k")
     assert r.resistance == pytest.approx(4700.0)
 
-    with pytest.raises(ValueError, match="Invalid engineering value"):
+    with pytest.raises(ValueError, match="Couldn't read"):
         r.set_parameter_value("resistance", "not_a_number")
     with pytest.raises(ValueError, match="must be > 0"):
         r.set_parameter_value("resistance", "-10")
@@ -399,15 +399,21 @@ win.show()
 app.processEvents()
 assert win.speed_combo.isVisible(), "Speed dropdown must be visible on toolbar without overflowing"
 
-# 3. Verify QuickValueDialog validation and readable error message (Addition #1)
+# 3. Verify QuickValueDialog validation, live preview, and readable error message (Addition #1)
 res = Resistor("R1", "a", "b", resistance=1000.0)
 dlg = QuickValueDialog(res)
 dlg.inputs["resistance"].setText("invalid_xyz")
 assert dlg._apply_current_inputs() is False
 assert dlg.error_label.isHidden() is False
-assert "Invalid" in dlg.error_label.text()
+assert "Couldn't read" in dlg.error_label.text()
+
+dlg.inputs["resistance"].setText("5,65 G")
+assert dlg.preview_labels["resistance"].text() == "= 5.65 GΩ"
+assert dlg._apply_current_inputs() is True
+assert dlg.applied_values["resistance"] == 5.65e9
 
 dlg.inputs["resistance"].setText("4.7k")
+assert dlg.preview_labels["resistance"].text() == "= 4.7 kΩ"
 assert dlg._apply_current_inputs() is True
 assert dlg.applied_values["resistance"] == 4700.0
 assert res.resistance == 4700.0

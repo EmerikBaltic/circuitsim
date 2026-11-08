@@ -19,7 +19,10 @@ from PySide6.QtWidgets import (
 
 from circuitsim.components.base import Component, ComponentParameter
 from circuitsim.components.switch import Switch
-from circuitsim.dialogs.value_parser import parse_engineering_value
+from circuitsim.dialogs.value_parser import (
+    format_engineering_value,
+    parse_engineering_value,
+)
 
 
 class QuickValueDialog(QDialog):
@@ -49,10 +52,11 @@ class QuickValueDialog(QDialog):
             component.get_editable_parameters()
         )
         self.inputs: dict[str, QLineEdit] = {}
+        self.preview_labels: dict[str, QLabel] = {}
         self.applied_values: dict[str, float] = {}
 
         self.setWindowTitle(f"Edit {component.name} ({component.component_type})")
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(380)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(14, 14, 14, 14)
@@ -60,7 +64,7 @@ class QuickValueDialog(QDialog):
 
         header = QLabel(
             f"<b>{component.name}</b> — Enter values using engineering prefixes "
-            "(`p`, `n`, `u`, `m`, `k`, `M`/`meg`, `G`):"
+            "(`p`, `n`, `u`, `m`, `k`/`K`, `M`/`meg`, `G`):"
         )
         header.setWordWrap(True)
         root_layout.addWidget(header)
@@ -68,22 +72,37 @@ class QuickValueDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(8)
         for spec in self._param_specs:
-            row_widget = QWidget(self)
+            field_container = QWidget(self)
+            field_vbox = QVBoxLayout(field_container)
+            field_vbox.setContentsMargins(0, 0, 0, 0)
+            field_vbox.setSpacing(2)
+
+            row_widget = QWidget(field_container)
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
 
             line_edit = QLineEdit(component.format_parameter_value(spec.key))
-            line_edit.setPlaceholderText(f"e.g. 4.7k, 100n ({spec.unit})")
-            line_edit.textChanged.connect(self._clear_error)
+            line_edit.setPlaceholderText(f"e.g. 4.7k, 5,65 G ({spec.unit})")
             self.inputs[spec.key] = line_edit
             row_layout.addWidget(line_edit, stretch=1)
 
             unit_lbl = QLabel(spec.unit)
             unit_lbl.setMinimumWidth(24)
             row_layout.addWidget(unit_lbl)
+            field_vbox.addWidget(row_widget)
 
-            form.addRow(f"{spec.label}:", row_widget)
+            preview_lbl = QLabel("")
+            preview_lbl.setStyleSheet("color: #8B949E; font-size: 11px;")
+            self.preview_labels[spec.key] = preview_lbl
+            field_vbox.addWidget(preview_lbl)
+
+            line_edit.textChanged.connect(
+                lambda _text, s=spec: self._on_field_text_changed(s)
+            )
+            self._update_field_preview(spec)
+
+            form.addRow(f"{spec.label}:", field_container)
 
         self.switch_closed_cb: QCheckBox | None = None
         if isinstance(component, Switch):
@@ -125,6 +144,30 @@ class QuickValueDialog(QDialog):
             self.error_label.clear()
             self.error_label.setVisible(False)
 
+    def _on_field_text_changed(self, spec: ComponentParameter) -> None:
+        self._clear_error()
+        self._update_field_preview(spec)
+
+    def _update_field_preview(self, spec: ComponentParameter) -> None:
+        lbl = self.preview_labels.get(spec.key)
+        if lbl is None:
+            return
+        raw_text = self.inputs[spec.key].text().strip()
+        try:
+            val = parse_engineering_value(raw_text)
+        except ValueError as exc:
+            lbl.setText(str(exc))
+            return
+
+        if not spec.allow_negative and not spec.allow_zero and val <= 0.0:
+            lbl.setText(f"{spec.label} must be > 0 {spec.unit}")
+            return
+        if not spec.allow_negative and spec.allow_zero and val < 0.0:
+            lbl.setText(f"{spec.label} cannot be negative")
+            return
+
+        lbl.setText(f"= {format_engineering_value(val, spec.unit)}")
+
     def validate_inputs(self) -> tuple[dict[str, float] | None, str | None]:
         """Validate all parameter fields and return `(parsed_dict, error_message)`."""
         parsed_map: dict[str, float] = {}
@@ -133,7 +176,7 @@ class QuickValueDialog(QDialog):
             try:
                 val = parse_engineering_value(raw_text)
             except ValueError as exc:
-                return None, f"Invalid {spec.label} ({raw_text!r}): {exc}"
+                return None, f"{spec.label}: {exc}"
 
             if not spec.allow_negative and not spec.allow_zero and val <= 0.0:
                 return (

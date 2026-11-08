@@ -1,14 +1,18 @@
 """Engineering-notation value parser and formatter.
 
 Follows Section 4 of circuit_simulator_specification.txt:
-Inside the app, prefixes are case-sensitive:
+Inside the app, prefixes are:
     p = pico (1e-12)
     n = nano (1e-9)
     u or µ = micro (1e-6)
-    m = milli (1e-3)
-    k = kilo (1e3)
+    m = milli (1e-3)      [case-sensitive: 'm' is milli, 'M' is mega]
+    k or K = kilo (1e3)
     M or meg = mega (1e6)
     G = giga (1e9)
+    ('P' is rejected because it is ambiguous between pico and peta.)
+
+Supports a single decimal comma when no dot is present (e.g. "5,65 G" -> 5.65e9)
+and optional whitespace between the number, prefix, and unit (e.g. "4.7 k", "5,65 G").
 
 Standard SPICE is case-insensitive, where 'm' and 'M' both mean milli (1e-3)
 and mega is written 'meg'. Use `parse_spice_value` when importing SPICE files.
@@ -20,6 +24,8 @@ import math
 import re
 
 # Case-sensitive multipliers used across the application UI and netlists.
+# Note: Both 'k' and 'K' are accepted for kilo (1e3), whereas 'm' (1e-3) and
+# 'M'/'meg' (1e6) remain strictly case-sensitive and 'P' is rejected.
 APP_PREFIX_MULTIPLIERS: dict[str, float] = {
     "": 1.0,
     "p": 1e-12,
@@ -29,6 +35,7 @@ APP_PREFIX_MULTIPLIERS: dict[str, float] = {
     "\u03bc": 1e-6,  # GREEK SMALL LETTER MU (μ)
     "m": 1e-3,
     "k": 1e3,
+    "K": 1e3,
     "M": 1e6,
     "meg": 1e6,
     "Meg": 1e6,
@@ -63,71 +70,104 @@ _KNOWN_UNITS: tuple[str, ...] = (
 
 # Regex matching:
 #   group('number'): signed decimal or scientific-notation float
-#   group('suffix'): optional trailing prefix + unit characters
+#   group('suffix'): optional trailing prefix + unit characters (with optional internal space)
 _VALUE_PATTERN = re.compile(
     r"^\s*(?P<number>[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?)"
-    r"\s*(?P<suffix>[a-zA-Z\u00b5\u03bc\u03a9\u2126]*)\s*$"
+    r"\s*(?P<suffix>[a-zA-Z\u00b5\u03bc\u03a9\u2126\s]*?)\s*$"
+)
+
+_READABLE_HELP_HINT = (
+    "Try 4.7k or 5.65G (use a dot or single comma for decimals; prefixes: p n u m k M G)."
 )
 
 
 def _strip_optional_unit(suffix: str, allowed_prefixes: set[str]) -> str:
     """Strip a trailing physical unit (e.g. 'Ohm', 'V', 'Hz') if present."""
-    if suffix in allowed_prefixes:
-        return suffix
+    compact = re.sub(r"\s+", "", suffix)
+    if compact in allowed_prefixes:
+        return compact
 
     # Sort longest unit first so 'ohms' matches before 's'.
     for unit in sorted(_KNOWN_UNITS, key=len, reverse=True):
-        if suffix.endswith(unit):
-            candidate_prefix = suffix[: -len(unit)]
+        if compact.endswith(unit):
+            candidate_prefix = compact[: -len(unit)]
             if candidate_prefix in allowed_prefixes:
                 return candidate_prefix
 
-    return suffix
+    return compact
 
 
 def parse_engineering_value(text: str | float | int) -> float:
     """Parse an application engineering-notation string into a float.
 
     Examples:
-        "4.7k"   -> 4700.0
-        "100n"   -> 1e-7
-        "2.2u"   -> 2.2e-6
-        "1M"     -> 1e6
-        "10meg"  -> 1e7
-        "15m"    -> 0.015
+        "4.7k"    -> 4700.0
+        "4,7k"    -> 4700.0
+        "5,65 G"  -> 5.65e9
+        "5.65 G"  -> 5.65e9
+        "10K"     -> 10000.0
+        "100n"    -> 1e-7
+        "2.2u"    -> 2.2e-6
+        "1M"      -> 1e6
+        "10meg"   -> 1e7
+        "15m"     -> 0.015
 
     Raises:
-        ValueError: If `text` is empty, malformed, non-finite, or uses an
-            unrecognized prefix.
+        ValueError: With a plain-language message if `text` is empty, has
+            ambiguous commas/dots, is non-finite, or uses an unknown prefix.
     """
     if isinstance(text, (int, float)) and not isinstance(text, bool):
         val = float(text)
         if not math.isfinite(val):
-            raise ValueError(f"Numeric value must be finite, got {text!r}.")
+            raise ValueError(
+                f"Couldn't read '{text}'. Please enter a finite number ({_READABLE_HELP_HINT})"
+            )
         return val
 
     if not isinstance(text, str):
-        raise ValueError(f"Expected a string or number, got {type(text).__name__}.")
+        raise ValueError(
+            f"Couldn't read value of type {type(text).__name__}. {_READABLE_HELP_HINT}"
+        )
 
-    if not text or not text.strip():
-        raise ValueError("Value string cannot be empty.")
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError(
+            f"Couldn't read empty value. {_READABLE_HELP_HINT}"
+        )
 
-    match = _VALUE_PATTERN.match(text)
+    # Check for decimal comma vs. ambiguous comma usage
+    comma_count = cleaned.count(",")
+    dot_count = cleaned.count(".")
+    if comma_count > 1 or (comma_count >= 1 and dot_count >= 1):
+        raise ValueError(
+            f"Couldn't read '{cleaned}'. Do not mix commas and dots or use thousands "
+            f"separators. {_READABLE_HELP_HINT}"
+        )
+
+    normalized = cleaned.replace(",", ".", 1) if comma_count == 1 else cleaned
+
+    match = _VALUE_PATTERN.match(normalized)
     if match is None:
-        raise ValueError(f"Invalid engineering value format: {text!r}.")
+        raise ValueError(f"Couldn't read '{cleaned}'. {_READABLE_HELP_HINT}")
 
     number_str = match.group("number")
-    raw_suffix = match.group("suffix")
+    raw_suffix = re.sub(r"\s+", "", match.group("suffix"))
 
-    base_value = float(number_str)
+    try:
+        base_value = float(number_str)
+    except ValueError as exc:
+        raise ValueError(
+            f"Couldn't read '{cleaned}'. {_READABLE_HELP_HINT}"
+        ) from exc
+
     if not math.isfinite(base_value):
-        raise ValueError(f"Numeric value must be finite: {text!r}.")
+        raise ValueError(f"Couldn't read '{cleaned}'. {_READABLE_HELP_HINT}")
 
     prefix = _strip_optional_unit(raw_suffix, set(APP_PREFIX_MULTIPLIERS.keys()))
     if prefix not in APP_PREFIX_MULTIPLIERS:
         raise ValueError(
-            f"Unknown engineering prefix {raw_suffix!r} in {text!r}. "
-            "Valid prefixes: p, n, u/µ, m (milli), k, M/meg (mega), G."
+            f"Couldn't read '{cleaned}' (unrecognized prefix '{raw_suffix}'). "
+            f"{_READABLE_HELP_HINT}"
         )
 
     return base_value * APP_PREFIX_MULTIPLIERS[prefix]
@@ -146,12 +186,16 @@ def parse_spice_value(text: str | float | int) -> float:
     if not isinstance(text, str) or not text.strip():
         raise ValueError("SPICE value string cannot be empty.")
 
-    match = _VALUE_PATTERN.match(text)
+    cleaned = text.strip()
+    if cleaned.count(",") == 1 and "." not in cleaned:
+        cleaned = cleaned.replace(",", ".", 1)
+
+    match = _VALUE_PATTERN.match(cleaned)
     if match is None:
-        raise ValueError(f"Invalid SPICE value format: {text!r}.")
+        raise ValueError(f"Couldn't read SPICE value '{text}'.")
 
     base_value = float(match.group("number"))
-    raw_suffix = match.group("suffix").lower()
+    raw_suffix = re.sub(r"\s+", "", match.group("suffix")).lower()
     if raw_suffix == "\u03bc":
         raw_suffix = "u"
 
