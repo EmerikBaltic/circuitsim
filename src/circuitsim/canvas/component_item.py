@@ -8,8 +8,10 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QPainter,
+    QPainterPath,
     QPen,
     QRadialGradient,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -118,6 +120,8 @@ class ComponentItem(QGraphicsObject):
         *,
         theme: ThemeMode = ThemeMode.DARK,
         is_ghost: bool = False,
+        rotation_deg: int = 0,
+        flipped_h: bool = False,
     ) -> None:
         super().__init__()
         self.component: Component = component
@@ -127,8 +131,12 @@ class ComponentItem(QGraphicsObject):
         )
         self.theme: ThemeMode = theme
         self.is_ghost: bool = is_ghost
-        self.rotation_deg: int = 0
-        self.flipped_h: bool = False
+        self._rotation_deg: int = 0
+        self._flipped_h: bool = False
+        if rotation_deg:
+            self.set_rotation_deg(rotation_deg)
+        if flipped_h:
+            self.set_flipped_h(flipped_h)
 
         # Live simulation visual states
         self.live_display_value: str | None = None
@@ -287,30 +295,47 @@ class ComponentItem(QGraphicsObject):
         sx, sy = snap_to_grid(x_px, y_px, GRID_PITCH_PX)
         self.setPos(sx, sy)
 
+    @property
+    def rotation_deg(self) -> int:
+        return self._rotation_deg
+
+    @rotation_deg.setter
+    def rotation_deg(self, deg: int) -> None:
+        self.set_rotation_deg(deg)
+
+    @property
+    def flipped_h(self) -> bool:
+        return self._flipped_h
+
+    @flipped_h.setter
+    def flipped_h(self, flipped: bool) -> None:
+        self.set_flipped_h(flipped)
+
     def rotate_90_cw(self) -> None:
         """Rotate component 90 degrees clockwise around its center `(0, 0)`."""
-        self.rotation_deg = (self.rotation_deg + 90) % 360
-        self._apply_local_transform()
+        self.set_rotation_deg((self._rotation_deg + 90) % 360)
 
     def rotate_90_ccw(self) -> None:
         """Rotate component 90 degrees counter-clockwise around its center `(0, 0)`."""
-        self.rotation_deg = (self.rotation_deg - 90) % 360
-        self._apply_local_transform()
+        self.set_rotation_deg((self._rotation_deg - 90) % 360)
 
     def set_rotation_deg(self, rotation_deg: int) -> None:
         """Set explicit rotation angle in `{0, 90, 180, 270}`."""
-        self.rotation_deg = int(rotation_deg) % 360
-        self._apply_local_transform()
+        target = int(rotation_deg) % 360
+        if self._rotation_deg != target:
+            self._rotation_deg = target
+            self._apply_local_transform()
 
     def flip_horizontal(self) -> None:
         """Mirror the component horizontally across its local Y axis."""
-        self.flipped_h = not self.flipped_h
-        self._apply_local_transform()
+        self.set_flipped_h(not self._flipped_h)
 
     def set_flipped_h(self, flipped: bool) -> None:
         """Set explicit horizontal mirror state."""
-        self.flipped_h = bool(flipped)
-        self._apply_local_transform()
+        target = bool(flipped)
+        if self._flipped_h != target:
+            self._flipped_h = target
+            self._apply_local_transform()
 
     def _apply_local_transform(self) -> None:
         # Keep QGraphicsObject transform as identity and apply rotation/flip inside
@@ -393,16 +418,65 @@ class ComponentItem(QGraphicsObject):
         val_rect = QRectF(val_x - 60.0, val_y - 9.0, 120.0, 18.0)
         return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
 
-    def boundingRect(self) -> QRectF:
+    def shape(self) -> QPainterPath:
+        """Return precision hit-test shape matching the rotated/flipped symbol body and terminals."""
         w_px, h_px = self.metadata.pixel_size
-        max_dim = float(max(w_px, h_px))
-        # Generous bounding box covering horizontal/vertical orientations and upright labels
-        return QRectF(
-            -max_dim / 2.0 - 36.0,
-            -max_dim / 2.0 - 36.0,
-            max_dim + 160.0,
-            max_dim + 72.0,
+        body_rect = QRectF(
+            -float(w_px) / 2.0 - 2.0,
+            -float(h_px) / 2.0 - 2.0,
+            float(w_px) + 4.0,
+            float(h_px) + 4.0,
         )
+
+        t = QTransform()
+        if self.rotation_deg:
+            t.rotate(float(self.rotation_deg))
+        if self.flipped_h:
+            t.scale(-1.0, 1.0)
+
+        raw_path = QPainterPath()
+        raw_path.setFillRule(Qt.FillRule.WindingFill)
+        raw_path.addRect(body_rect)
+        path = t.map(raw_path)
+        path.setFillRule(Qt.FillRule.WindingFill)
+
+        for term in self.metadata.terminals:
+            tx, ty = transform_terminal_position(
+                term.grid_pos,
+                (0.0, 0.0),
+                rotation_deg=self.rotation_deg,
+                flipped_h=self.flipped_h,
+                grid_px=GRID_PITCH_PX,
+            )
+            term_path = QPainterPath()
+            term_path.addEllipse(QPointF(tx, ty), 6.0, 6.0)
+            path = path.united(term_path)
+
+        path.setFillRule(Qt.FillRule.WindingFill)
+        return path
+
+    def boundingRect(self) -> QRectF:
+        """Return tight bounding rectangle enclosing the rotated symbol body, terminals, and upright labels."""
+        rect = self.shape().boundingRect()
+
+        if not self.is_ghost:
+            lbl_rect, val_rect, _ = self._upright_label_and_value_rects()
+            rect = rect.united(lbl_rect)
+            if (
+                self.component.show_value
+                and self.component.component_type != "ground"
+            ):
+                rect = rect.united(val_rect)
+            if self.diagnostic_severity in ("error", "warning") or (
+                isinstance(self.component, Lightbulb)
+                and self.component.is_over_bright
+            ):
+                rect = rect.united(QRectF(11.0, -25.0, 14.0, 14.0))
+
+        if isinstance(self.component, Lightbulb) and not self.is_ghost:
+            rect = rect.united(QRectF(-36.0, -36.0, 72.0, 72.0))
+
+        return rect.adjusted(-4.0, -4.0, 4.0, 4.0)
 
     def itemChange(
         self,
