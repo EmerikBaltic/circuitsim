@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QByteArray, QPointF, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -96,6 +96,18 @@ class MainWindow(QMainWindow):
         )
         self.apply_theme(self.theme)
         self._update_window_title()
+
+    def restoreState(self, state: QByteArray | bytes, version: int = 0) -> bool:
+        """Restore window state while ensuring any stale Oscilloscope dock cannot be brought back."""
+        res = super().restoreState(state, version)
+        for dock in self.findChildren(QDockWidget):
+            title = dock.windowTitle().lower()
+            obj_name = dock.objectName().lower()
+            if "oscilloscope" in title or "oscilloscope" in obj_name:
+                self.removeDockWidget(dock)
+                dock.setParent(None)
+                dock.deleteLater()
+        return res
 
     def _build_menus_and_toolbars(self) -> None:
         menu_bar = self.menuBar()
@@ -215,34 +227,34 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.act_junction)
 
         # View menu
-        view_menu = menu_bar.addMenu("&View")
+        self.view_menu = menu_bar.addMenu("&View")
         self.act_toggle_grid = QAction(
             "Show &Grid (20 px)", self, checkable=True
         )
         self.act_toggle_grid.setChecked(True)
         self.act_toggle_grid.toggled.connect(self.circuit_scene.set_show_grid)
-        view_menu.addAction(self.act_toggle_grid)
+        self.view_menu.addAction(self.act_toggle_grid)
 
         self.act_toggle_theme = QAction("Light &Theme", self)
         self.act_toggle_theme.setShortcut(QKeySequence("Ctrl+T"))
         self.act_toggle_theme.setToolTip("Toggle between Dark and Light themes (Shortcut: Ctrl+T)")
         self.act_toggle_theme.triggered.connect(self.toggle_theme)
-        view_menu.addAction(self.act_toggle_theme)
+        self.view_menu.addAction(self.act_toggle_theme)
 
-        view_menu.addSeparator()
+        self.view_menu.addSeparator()
         act_zoom_in = QAction("Zoom &In", self)
         act_zoom_in.setShortcut(QKeySequence.StandardKey.ZoomIn)
         act_zoom_in.triggered.connect(self.circuit_view.zoom_in)
-        view_menu.addAction(act_zoom_in)
+        self.view_menu.addAction(act_zoom_in)
 
         act_zoom_out = QAction("Zoom &Out", self)
         act_zoom_out.setShortcut(QKeySequence.StandardKey.ZoomOut)
         act_zoom_out.triggered.connect(self.circuit_view.zoom_out)
-        view_menu.addAction(act_zoom_out)
+        self.view_menu.addAction(act_zoom_out)
 
         act_zoom_reset = QAction("&Reset Zoom (100%)", self)
         act_zoom_reset.triggered.connect(self.circuit_view.reset_zoom)
-        view_menu.addAction(act_zoom_reset)
+        self.view_menu.addAction(act_zoom_reset)
 
         # Simulation menu
         sim_menu = menu_bar.addMenu("&Simulation")
@@ -265,8 +277,7 @@ class MainWindow(QMainWindow):
         sim_menu.addAction(self.act_pause)
         sim_menu.addAction(self.act_stop)
 
-        # Instruments & Help menus
-        self.instruments_menu = menu_bar.addMenu("&Instruments")
+        # Help menu
         help_menu = menu_bar.addMenu("&Help")
         act_reload_svg = QAction("&Reload Custom SVGs", self)
         act_reload_svg.triggered.connect(self._reload_custom_svgs)
@@ -340,24 +351,11 @@ class MainWindow(QMainWindow):
         self.info_dock.setMinimumWidth(275)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.info_dock)
 
-        # 3. Bottom Dock: Oscilloscope Panel Placeholder
-        self.scope_dock = QDockWidget("Oscilloscope (4-Channel)", self)
-        scope_container = QWidget()
-        scope_layout = QHBoxLayout(scope_container)
-        scope_label = QLabel(
-            "4-Channel Oscilloscope Dock (Detachable / Multi-Monitor Ready — Milestone 4)"
-        )
-        scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scope_layout.addWidget(scope_label)
-        scope_container.setMinimumHeight(85)
-        self.scope_dock.setWidget(scope_container)
-        self.addDockWidget(
-            Qt.DockWidgetArea.BottomDockWidgetArea, self.scope_dock
-        )
-
-        self.instruments_menu.addAction(self.scope_dock.toggleViewAction())
-        self.instruments_menu.addAction(self.palette_dock.toggleViewAction())
-        self.instruments_menu.addAction(self.info_dock.toggleViewAction())
+        # Add dock panel visibility actions to View menu
+        if hasattr(self, "view_menu"):
+            self.view_menu.addSeparator()
+            self.view_menu.addAction(self.palette_dock.toggleViewAction())
+            self.view_menu.addAction(self.info_dock.toggleViewAction())
 
     def _build_status_bar(self) -> None:
         sb = self.statusBar()
