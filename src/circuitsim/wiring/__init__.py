@@ -12,6 +12,7 @@ from circuitsim.wiring.model import (
     WireGraphError,
 )
 from circuitsim.wiring.netlist import GROUND_NODE, WiringNetlist, build_circuit
+from circuitsim.wiring.router import route
 
 __all__ = [
     "Attachment",
@@ -26,4 +27,5 @@ __all__ = [
     "WireGraphError",
     "WiringNetlist",
     "build_circuit",
+    "route",
 ]
