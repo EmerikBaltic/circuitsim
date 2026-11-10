@@ -20,11 +20,43 @@ Below are improvement ideas identified during **Milestones 1 & 2**. None of thes
    - *Reason*: Running a fast check on startup that verifies all 11 built-in IEC symbol `.json` definitions exist, match the expected terminal grid footprints, and log a non-blocking banner if a user-edited `.svg` file has syntax or viewBox mismatches makes custom symbol authoring easier to debug.
 9. **Optional Bulb Burn-Out When Overloaded for Too Long** *(Effort: Small)*
    - *Reason*: `Lightbulb` already has `burnout_enabled`, `burnout_power_ratio` and `burnout_time` in the engine; exposing them in the properties dialog (off by default) would let students see a bulb fail at e.g. 120% power for 0.5 s.
-10. **Check Spacing Between a Source's Selection Box and the Ground Label (GND2)** *(Effort: Small)*
-    - *Reason*: In testing, the selection box of a voltage source touches the ground label (`GND2`); label placement near the `Ground` symbol needs a quick geometry check like the one done for value labels.
+10. **Check Spacing Between a Source's Selection Box and the Ground Label (GND2)** *(Done in Item 4)*
+    - *Resolution*: Ground label placement adjusted below the earth bars (`label_offset[1] >= 0`), providing 30 px clearance and ensuring Voltage Source selection outline never touches `GND2` label.
 11. **Recent Files List in the File Menu** *(Effort: Small)*
     - *Reason*: Reopening the last few `.circ` files with one click is the first thing students will want once they have more than two saved circuits.
 12. **Saved Parts / Favourites** *(Effort: Medium)*
     - *Note*: saved parts / favourites, redesign later if users ask for it. Digit keys are no longer reserved for it.
-13. **Mark a Switch Click as an Unsaved Change** *(Effort: Small)*
-    - *Reason*: Clicking a switch on the canvas changes the saved state but is not on the undo stack, so the title asterisk does not appear. Making it an undoable action fixes both.
+13. **Mark a Switch Click as an Unsaved Change** *(Done in Item 4)*
+    - *Resolution*: Toggling a switch on the canvas now marks the document modified (`has_unsaved_changes() = True`, window title asterisk `*`), but does not push to `QUndoStack` (not undoable). Saving clears the modified state.
+
+---
+
+## Planned order
+
+The recommended sequence for future work on CircuitSim:
+
+1. **Step 4: Canvas Integration of Explicit Wiring Model (`WireGraph` + `WireItem` + `JunctionItem`)**
+   - *Why first*: This is the core architectural prerequisite to eliminate coordinate-based connectivity bugs, short circuits on rotation, and detour heuristics. Steps 1 to 3 are complete and tested in pure Python; Step 4 connects them to the user-facing canvas.
+2. **Recent Files List in the File Menu (Item 11)**
+   - *Why second*: High-value, low-effort usability feature. Once users have save/load working, easily reopening recent `.circ` projects makes working with multiple circuits seamless.
+3. **Properties Dialog (Step 3C) & Analysis Tutor (Item 2)**
+   - *Why third*: Completes Milestone 3 by exposing secondary component settings (e.g., initial switch state, AC waveform types, capacitor initial voltage) and provides an interactive educational tool for student circuit analysis.
+4. **GitHub Actions CI (Item 6)**
+   - *Why fourth*: Automates running `pytest` (headless offscreen) on every push and pull request, protecting code quality and preventing regressions on clean machines.
+
+---
+
+## Defer until a real problem appears
+
+Items to deliberately postpone until an actual practical problem arises:
+
+1. **Saved Parts / Favourites (Item 12)**
+   - *Reason to defer*: Cancelled by design decision after testing; digit keys are unreserved. Only revisit if users explicitly demand a redesigned favourite parts palette.
+2. **Diagonal Preconditioning (Item 4)**
+   - *Reason to defer*: Current circuits (tens of components) solve with condition numbers well within SciPy's standard LU factorization limits. Defer until large benchmarks (>500 nodes) show numerical degradation.
+3. **Adaptive Time-Step Control via LTE (Item 3)**
+   - *Reason to defer*: Fixed-$dt$ with Trapezoidal integration and Backward Euler switching settling is deterministic, robust, and fast. Defer until high-frequency oscillator or chaotic circuit simulations show stepping artifacts.
+4. **Symbol Style Setting (IEC / ANSI) (Item 1)**
+   - *Reason to defer*: IEC 60617 symbols are already complete, clean, and unambiguous. Maintaining dual SVG/procedural symbol catalogs doubles asset and test maintenance overhead without adding simulation functionality.
+5. **0 V Branch-Current Mode for Ideal Ammeters (Item 5)**
+   - *Reason to defer*: The current $1\text{ m}\Omega$ ammeter companion model introduces negligible burden voltage in standard student circuits. Defer until ultra-low-impedance circuits require exact zero-burden current sensing.

@@ -89,8 +89,67 @@
        - V1 migration edge cases with unattached floating wire clusters. Mitigation: Cluster grouping via legacy Union-Find before attachment synthesis.
     ```
 
+- **Explicit Wiring Redesign (Steps 0 to 4 Done)**:
+  - **Item 0: Single Source of Truth for Terminals & Drag vs. Jitter**:
+    - Added comprehensive regression tests in [`tests/test_terminal_source_of_truth_and_drag.py`](tests/test_terminal_source_of_truth_and_drag.py).
+    - Verified all 88 combinations (11 components $\times$ 4 rotations $\times$ 2 flips) prove that `item.terminal_scene_positions()`, `spec.resolve_terminals_px()`, `shape().contains()`, terminal snapping, and rendered terminal dot pixels from `item.paint()` all take their coordinates strictly from `transform_terminal_position`.
+    - Tested that deliberate 40 px drag moves a part by 2 grid cells (+40 px) and creates an undo command, while 3 px mouse jitter moves by 0 px and creates zero undo commands.
+  - **Item 1: Pure-Python Wiring Model & Union-Find Netlist Builder (`src/circuitsim/wiring/`)**:
+    - Built [`src/circuitsim/wiring/model.py`](src/circuitsim/wiring/model.py) with zero Qt imports: `TerminalRef(component, terminal)`, `JunctionRef(id)`, `FreeEnd(x, y)`, `Wire(id, end_a, end_b, hints)`, `Junction(id, pos)`, and `WireGraph`.
+    - `WireGraph` is an immutable frozen dataclass; every operation (`add_wire`, `remove_wire`, `add_junction`, `split_wire_at`, `remove_junction`, `remove_component`) returns a new graph.
+    - Automatic cascading merge rules: degree 2 junction merges 2 wires into 1 (storing junction pos in hints); degree 1 junction converts wire end to `FreeEnd`; degree 0 junction is deleted; duplicate wires are deduplicated.
+    - Built [`src/circuitsim/wiring/netlist.py`](src/circuitsim/wiring/netlist.py): Union-Find over explicit attachments producing solver-ready `Circuit` with deterministic node names ("0", "N1", ...).
+    - Added 20 unit and equivalence tests in [`tests/test_wiring_model_and_netlist.py`](tests/test_wiring_model_and_netlist.py) verifying immutability, merge rules, crossing wires remaining separate, 200 random operations maintaining validity, diagnostics (`NoGroundError`, `FloatingNodeError`, `VoltageSourceLoopError`), and exact voltage divider, RC, 12V+12V, and switch-bulb equivalence against analytic calculations.
+  - **Item 2: Pure-Python Orthogonal Wire Router with Latching (`src/circuitsim/wiring/router.py`)**:
+    - Built `route(start, end, start_dir, end_dir, obstacles, previous=None)` with zero Qt imports.
+    - Enforces orthogonal paths, outward departure in `start_dir`, inward arrival in `-end_dir`, obstacle collision avoidance (inflated bounding boxes, exempting attached terminals), deterministic <= 2 bend candidates, minimal-bend A* grid search fallback, and orientation latching from `previous` routes.
+    - Added 10 unit tests in [`tests/test_wiring_router.py`](tests/test_wiring_router.py) covering straight, L-shape, Z-shape, facing/opposed terminals, obstacle avoidance, collinear simplification, and latching.
+  - **Item 3: Schema v2 File Format & v1-to-v2 Migration (`src/circuitsim/wiring/serializer.py`)**:
+    - Defined Schema v2 storing explicit attachments (`terminal`, `junction`, `free`), explicit junctions, and view state.
+    - Implemented `migrate_v1_to_v2` running geometric extraction once, slicing wires at internal vertices and segments, preserving separation of crossing wires without dots, and cleaning stray dots.
+    - Added 9 unit tests in [`tests/test_wiring_v2_migration.py`](tests/test_wiring_v2_migration.py) verifying voltage divider, RC circuit, 12V+12V chain, rotated/flipped parts, crossing wire separation, v2 save/load round-tripping, and error handling.
+  - **Item 4: Small Usability & Geometry Fixes**:
+    - Switch toggle marks file modified: Clicking a switch on the canvas marks the document modified (`has_unsaved_changes() = True`, window title asterisk `*`), but does NOT push to `QUndoStack` (not undoable). Saving clears the modified state.
+    - Selection outline clearance: Adjusted Ground label positioning below the earth bars (`label_offset[1] >= 0`), providing 30 px clearance and ensuring Voltage Source selection outline never touches `GND2` label.
+    - Added offscreen Qt tests in [`tests/test_switch_dirty_and_ground_label_clearance.py`](tests/test_switch_dirty_and_ground_label_clearance.py).
+
+## STEP 4 REQUIREMENTS (not built yet)
+
+Everything Step 4 needs to do to integrate the wire redesign with the schematic canvas:
+
+1. **Canvas `WireGraph` Integration**:
+   - Replace raw `_wire_items` list and `_explicit_junctions` coordinate set in `CircuitScene` with `WireGraph` as the single source of truth for all schematic connections.
+   - Replace coordinate-coincidence netlist extraction in `CircuitScene.build_circuit()` with `build_circuit(self.wire_graph, [item.component for item in self.placed_items])`.
+
+2. **Visual `WireItem` and `JunctionItem`**:
+   - Update `WireItem` to store a `Wire` reference (`id`, `end_a`, `end_b`, `hints`).
+   - Dynamically compute polyline points from `route(start_pos, end_pos, start_dir, end_dir, obstacles, previous=self.points)`.
+   - Implement `JunctionItem` representing a `Junction` object:
+     - Drawn as a solid dot only when degree $\ge 3$.
+     - When degree drops to 2 (e.g. wire removed), automatically merges into a simple bend (stored as a hint in the combined wire) and the dot disappears.
+     - `JunctionItem` is selectable, draggable, and deletable.
+   - Draw `FreeEnd` attachments with a distinct hollow circular marker indicating an open-circuit wire end.
+
+3. **Interactive Wiring & Terminal Snapping**:
+   - When drawing a wire, hovering within `TERMINAL_SNAP_RADIUS_PX = 10 px` of a terminal snaps to that terminal; releasing binds that end as a `TerminalRef(comp_name, term_name)`.
+   - Releasing a wire endpoint onto the interior of an existing wire automatically calls `graph.split_wire_at()`, creating a `Junction` and binding the new wire end to `JunctionRef(jid)`.
+   - Releasing a wire in empty space creates a `FreeEnd(x, y)`.
+   - Dragging a `FreeEnd` onto a terminal converts it to a `TerminalRef`.
+
+4. **Component Dragging & Wire Tracking**:
+   - When one or more components are moved, rotated (`R`), or flipped (`F`), attached wire endpoints follow their terminals automatically.
+   - Update wire routes live using `route(...)` with orientation latching, preserving user-created waypoints where applicable.
+   - Completely remove the legacy 40 px detour heuristic (`_route_wire_avoiding_body`) and coordinate-based endpoint mutation.
+
+5. **`QUndoStack` Editing Commands with Immutability**:
+   - Because `WireGraph` is immutable, each wire editing command (`AddWireCommand`, `RemoveWireCommand`, `MoveComponentCommand`, `SplitWireCommand`, `DeleteSelectionCommand`) simply stores the `old_graph` and `new_graph` instances, making undo and redo trivial and 100% reliable.
+
+6. **Schema v2 Canvas Save / Load**:
+   - Update `CircuitScene.to_document()` to output `CircuitDocumentV2` and `CircuitScene.load_document()` to accept `CircuitDocumentV2` (auto-migrating legacy v1 files on load).
+
 ### What Is Next (Milestone 3)
-- **Step 3C** (full properties dialog) remains. Step 3A is done, and Step 3B is cancelled by design decision.
+- **Step 4** (Canvas Integration of Explicit Wiring Model).
+- **Step 3C** (Full properties dialog) follows Step 4. Step 3A is done, and Step 3B is cancelled by design decision.
 
 ### How to Run the App, Preview Tool, and Tests
 

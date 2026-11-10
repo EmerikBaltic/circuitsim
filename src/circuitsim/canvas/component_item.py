@@ -404,17 +404,18 @@ class ComponentItem(QGraphicsObject):
             align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             return lbl_rect, val_rect, align
 
+        if self.component.component_type == "ground":
+            lbl_x = 0.0
+            lbl_y = -float(h_px) / 2.0 - 2.0 if self.rotation_deg == 180 else float(h_px) / 2.0 + 2.0
+            lbl_rect = QRectF(lbl_x - 50.0, lbl_y - 9.0, 100.0, 18.0)
+            val_rect = QRectF(-60.0, 0.0, 120.0, 18.0)
+            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+
         lbl_x = self.metadata.label_offset[0] * GRID_PITCH_PX
-        if self.metadata.label_offset[1] >= 0:
-            lbl_y = max(
-                self.metadata.label_offset[1] * GRID_PITCH_PX,
-                float(h_px) / 2.0 + 2.0,
-            )
-        else:
-            lbl_y = min(
-                self.metadata.label_offset[1] * GRID_PITCH_PX,
-                -float(h_px) / 2.0 - 14.0,
-            )
+        lbl_y = min(
+            self.metadata.label_offset[1] * GRID_PITCH_PX,
+            -float(h_px) / 2.0 - 14.0,
+        )
         val_x = self.metadata.value_offset[0] * GRID_PITCH_PX
         val_y = max(
             self.metadata.value_offset[1] * GRID_PITCH_PX,
