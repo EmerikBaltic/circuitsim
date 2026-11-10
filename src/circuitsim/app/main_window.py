@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         self._sim_state: SimulationState = SimulationState.STOPPED
         self._last_error_reason: str = ""
         self._current_path: Path | None = None
+        self._switch_modified: bool = False
 
         self._build_menus_and_toolbars()
         self._build_docks()
@@ -526,11 +527,11 @@ class MainWindow(QMainWindow):
     def _update_window_title(self) -> None:
         """Show '<file name>*' (asterisk = unsaved changes) in the title bar."""
         name = self._current_path.name if self._current_path else "Untitled"
-        star = "" if self.circuit_scene.undo_stack.isClean() else "*"
+        star = "*" if self.has_unsaved_changes() else ""
         self.setWindowTitle(f"{name}{star} — CircuitSim")
 
     def has_unsaved_changes(self) -> bool:
-        return not self.circuit_scene.undo_stack.isClean()
+        return not self.circuit_scene.undo_stack.isClean() or self._switch_modified
 
     def _show_error(self, title: str, text: str) -> None:
         """Friendly error box (separate method so tests can replace it)."""
@@ -572,6 +573,7 @@ class MainWindow(QMainWindow):
         self.stop_simulation()
         self.circuit_scene.clear_schematic()
         self._current_path = None
+        self._switch_modified = False
         self._update_window_title()
 
     def _on_open_circuit(self) -> None:
@@ -609,6 +611,7 @@ class MainWindow(QMainWindow):
             self.speed_combo.setCurrentIndex(idx)
         self.circuit_view.set_view_state(doc.view.zoom, doc.view.pan)
         self._current_path = p
+        self._switch_modified = False
         self._update_window_title()
         self.statusBar().showMessage(f"Opened {p.name}", 4000)
         return True
@@ -623,6 +626,7 @@ class MainWindow(QMainWindow):
             return False
         self.circuit_scene.undo_stack.setClean()
         self._current_path = p
+        self._switch_modified = False
         self._update_window_title()
         self.statusBar().showMessage(f"Saved {p.name}", 4000)
         return True
@@ -649,6 +653,8 @@ class MainWindow(QMainWindow):
             self.sim_controller.set_speed(SimulationSpeed(str(raw)))
 
     def _on_user_switch_toggled(self, switch_name: str, _closed: bool) -> None:
+        self._switch_modified = True
+        self._update_window_title()
         if self._sim_state in (SimulationState.RUNNING, SimulationState.PAUSED):
             self.sim_controller.toggle_switch(switch_name)
 

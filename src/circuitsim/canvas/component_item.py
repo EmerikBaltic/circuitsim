@@ -405,10 +405,16 @@ class ComponentItem(QGraphicsObject):
             return lbl_rect, val_rect, align
 
         lbl_x = self.metadata.label_offset[0] * GRID_PITCH_PX
-        lbl_y = min(
-            self.metadata.label_offset[1] * GRID_PITCH_PX,
-            -float(h_px) / 2.0 - 14.0,
-        )
+        if self.metadata.label_offset[1] >= 0:
+            lbl_y = max(
+                self.metadata.label_offset[1] * GRID_PITCH_PX,
+                float(h_px) / 2.0 + 2.0,
+            )
+        else:
+            lbl_y = min(
+                self.metadata.label_offset[1] * GRID_PITCH_PX,
+                -float(h_px) / 2.0 - 14.0,
+            )
         val_x = self.metadata.value_offset[0] * GRID_PITCH_PX
         val_y = max(
             self.metadata.value_offset[1] * GRID_PITCH_PX,
