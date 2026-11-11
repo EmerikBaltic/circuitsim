@@ -1,5 +1,7 @@
 # CircuitSim — Desktop Electrical Circuit Simulator
 
+[![CI](https://github.com/EmerikBaltic/circuitsim/actions/workflows/ci.yml/badge.svg)](https://github.com/EmerikBaltic/circuitsim/actions/workflows/ci.yml)
+
 **CircuitSim** is an open-source, educational desktop electrical circuit simulator built with **Python 3.11+**, **NumPy / SciPy** (Modified Nodal Analysis physics engine), and **PySide6 (Qt 6 Widgets)**.
 
 It is designed for electrical engineering students and hobbyists who want both an interactive schematic capture + virtual instrument bench and a clean, readable Python codebase that demonstrates how real circuit simulators (like SPICE) work under the hood.

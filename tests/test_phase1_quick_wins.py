@@ -1025,6 +1025,35 @@ print("TASK9_OK")
     assert "TASK9_OK" in res.stdout
 
 
+def test_task10_continuous_integration() -> None:
+    """Task 10: GitHub Actions CI workflow and README status badge.
+
+    Verifications:
+        - .github/workflows/ci.yml exists with Windows runner, Python 3.12,
+          QT_QPA_PLATFORM=offscreen environment variable, and pytest invocation.
+        - README.md contains the GitHub Actions workflow status badge link.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    ci_file = repo_root / ".github" / "workflows" / "ci.yml"
+    assert ci_file.exists(), ".github/workflows/ci.yml must exist"
+
+    ci_content = ci_file.read_text(encoding="utf-8")
+    assert "windows-latest" in ci_content, "CI must run on windows-latest"
+    assert "3.12" in ci_content, "CI must use Python 3.12"
+    assert "QT_QPA_PLATFORM" in ci_content, "CI must set QT_QPA_PLATFORM=offscreen"
+    assert "offscreen" in ci_content
+    assert "pytest" in ci_content, "CI must invoke pytest"
+    assert "push" in ci_content
+    assert "pull_request" in ci_content
+
+    readme_file = repo_root / "README.md"
+    assert readme_file.exists()
+    readme_content = readme_file.read_text(encoding="utf-8")
+    assert "badge.svg" in readme_content, "README.md must contain CI status badge"
+    assert "workflows/ci.yml" in readme_content
+
+
+
 
 
 
