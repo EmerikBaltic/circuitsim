@@ -418,3 +418,172 @@ print("TASK4_OK")
     assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
     assert "TASK4_OK" in res.stdout
 
+
+def test_task5_hover_tooltips_with_live_values() -> None:
+    """Task 5: Hover tooltips with live values for parts and terminals.
+
+    Hand-calculated values:
+        - Circuit: 12 V DC source connected across a 1 kΩ resistor.
+        - Node 1 voltage: V = 12.0 V.
+        - Ground node 0: V = 0.0 V.
+        - Resistor current: I = V / R = 12 V / 1000 Ω = 0.012 A (12 mA).
+        - Resistor absorbed power: P = V * I = 12 V * 0.012 A = 0.144 W (144 mW).
+        - Voltage source delivered power: P_del = 144 mW, absorbed = -144 mW.
+
+    Verification:
+        - When running:
+          * Resistor tooltip displays: Name, Value, 12 V, 12 mA, 144 mW.
+          * Source tooltip displays: Name, Value, 12 V, 12 mA, -144 mW (delivering),
+            and explanation "Positive power is absorbed; sources indicate delivered power."
+          * Terminal tooltip displays terminal name, net name, and "Node voltage: 12 V".
+        - When stopped:
+          * Part tooltip displays: Voltage: --, Current: --, Power: --.
+          * Terminal tooltip displays: Node voltage: --.
+        - Layout invariance:
+          * sceneRect, part positions, scrollbars, and zoom are strictly unchanged by tooltips.
+    """
+    script = """
+import sys
+from PySide6.QtCore import QPoint, QPointF
+from PySide6.QtGui import QHelpEvent
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.engine.simulation_session import ComponentTelemetry, SimulationFrame, SimulationState
+
+app = QApplication.instance() or QApplication([])
+win = MainWindow()
+scene = win.circuit_scene
+view = win.circuit_view
+
+win.show()
+app.processEvents()
+
+# Place 12 V source, 1 kΩ resistor, and ground
+# V1 pos at (-40, 100), neg at (40, 100)
+# R1 a at (-40, -100), b at (40, -100)
+# GND gnd at (40, 100)
+v1 = scene.place_new_component("dc_voltage", QPointF(0.0, 100.0))
+v1.component.dc_voltage = 12.0
+r1 = scene.place_new_component("resistor", QPointF(0.0, -100.0))
+r1.component.resistance = 1000.0
+gnd = scene.place_new_component("ground", QPointF(40.0, 140.0))
+
+p_v1 = v1.terminal_scene_positions_px()["pos"]
+p_r1 = r1.terminal_scene_positions_px()["a"]
+n_v1 = v1.terminal_scene_positions_px()["neg"]
+n_r1 = r1.terminal_scene_positions_px()["b"]
+g_gnd = gnd.terminal_scene_positions_px()["gnd"]
+
+# Connect pos to a (node N1 = 12 V) and neg to b + gnd (node 0 = 0 V)
+scene.add_wire((p_v1, p_r1))
+scene.add_wire((n_v1, n_r1))
+app.processEvents()
+
+conn = scene.extract_connectivity_result()
+net_r1_a = conn.component_nodes["R1"]["a"]
+net_r1_b = conn.component_nodes["R1"]["b"]
+
+# Record baseline canvas state after layout and wire placement
+scene_rect_before = scene.sceneRect()
+pos_r1_before = (r1.pos().x(), r1.pos().y())
+pos_v1_before = (v1.pos().x(), v1.pos().y())
+h_scroll_before = view.horizontalScrollBar().value()
+v_scroll_before = view.verticalScrollBar().value()
+zoom_before = view.zoom_factor
+
+# -----------------------------------------------------------------
+# 1. Stopped state tooltips
+# -----------------------------------------------------------------
+r1_tip_stopped = scene.get_component_tooltip(r1)
+assert "Name: R1" in r1_tip_stopped
+assert "Value: 1 kΩ" in r1_tip_stopped
+assert "Voltage: --" in r1_tip_stopped
+assert "Current: --" in r1_tip_stopped
+assert "Power: --" in r1_tip_stopped
+
+v1_tip_stopped = scene.get_component_tooltip(v1)
+assert "Name: V1" in v1_tip_stopped
+assert "Voltage: --" in v1_tip_stopped
+
+t_tip_stopped = scene.get_terminal_tooltip(r1, "a")
+assert "Terminal: a" in t_tip_stopped
+assert f"Net: {net_r1_a}" in t_tip_stopped
+assert "Node voltage: --" in t_tip_stopped
+
+# -----------------------------------------------------------------
+# 2. Running state tooltips
+# -----------------------------------------------------------------
+# Hand-calculated formula values:
+# I = 12 V / 1000 Ω = 0.012 A (12 mA)
+# P_absorbed_resistor = 12 V * 0.012 A = 0.144 W (144 mW)
+# P_absorbed_source = -0.144 W (-144 mW, delivering)
+frame = SimulationFrame(
+    state=SimulationState.RUNNING,
+    sim_time=0.1,
+    dt=1e-3,
+    speed_ratio=1.0,
+    node_voltages={net_r1_a: 12.0, net_r1_b: 0.0},
+    components={
+        "V1": ComponentTelemetry("V1", "dc_voltage", 12.0, 0.012, -0.144, "12 V"),
+        "R1": ComponentTelemetry("R1", "resistor", 12.0, 0.012, 0.144, "1 kΩ"),
+    },
+)
+scene.apply_simulation_frame(frame)
+
+r1_tip_running = scene.get_component_tooltip(r1)
+assert "Name: R1" in r1_tip_running
+assert "12 V" in r1_tip_running
+assert "12 mA" in r1_tip_running
+assert "144 mW" in r1_tip_running
+
+v1_tip_running = scene.get_component_tooltip(v1)
+assert "Name: V1" in v1_tip_running
+assert "12 V" in v1_tip_running
+assert "12 mA" in v1_tip_running
+assert "-144 mW" in v1_tip_running
+assert "(delivering)" in v1_tip_running
+assert "Positive power is absorbed; sources indicate delivered power." in v1_tip_running
+
+t_tip_running = scene.get_terminal_tooltip(r1, "a")
+assert "Terminal: a" in t_tip_running
+assert f"Net: {net_r1_a}" in t_tip_running
+assert "Node voltage: 12 V" in t_tip_running
+
+# -----------------------------------------------------------------
+# 3. ViewportEvent QHelpEvent dispatch
+# -----------------------------------------------------------------
+win.show()
+app.processEvents()
+
+# Help event on component body
+pos_in_view = view.mapFromScene(r1.pos())
+help_comp = QHelpEvent(QHelpEvent.Type.ToolTip, pos_in_view, view.mapToGlobal(pos_in_view))
+assert view.viewportEvent(help_comp), "CircuitView.viewportEvent should handle component tooltip"
+
+# Help event on terminal
+term_in_view = view.mapFromScene(QPointF(float(p_r1[0]), float(p_r1[1])))
+help_term = QHelpEvent(QHelpEvent.Type.ToolTip, term_in_view, view.mapToGlobal(term_in_view))
+assert view.viewportEvent(help_term), "CircuitView.viewportEvent should handle terminal tooltip"
+
+app.processEvents()
+
+# -----------------------------------------------------------------
+# 4. Canvas invariance check
+# -----------------------------------------------------------------
+assert scene.sceneRect() == scene_rect_before, "sceneRect must be strictly unchanged by tooltips"
+assert (r1.pos().x(), r1.pos().y()) == pos_r1_before, "R1 position must be strictly unchanged by tooltips"
+assert (v1.pos().x(), v1.pos().y()) == pos_v1_before, "V1 position must be strictly unchanged by tooltips"
+assert view.horizontalScrollBar().value() == h_scroll_before, "Horizontal scrollbar must be unchanged"
+assert view.verticalScrollBar().value() == v_scroll_before, "Vertical scrollbar must be unchanged"
+assert view.zoom_factor == zoom_before, "Zoom factor must be unchanged"
+
+scene.undo_stack.setClean()
+win._switch_modified = False
+print("TASK5_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK5_OK" in res.stdout
+
+

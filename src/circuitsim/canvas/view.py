@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPointF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QContextMenuEvent,
@@ -10,13 +10,14 @@ from PySide6.QtGui import (
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QHelpEvent,
     QKeyEvent,
     QKeySequence,
     QMouseEvent,
     QPainter,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QGraphicsView, QMenu
+from PySide6.QtWidgets import QGraphicsView, QMenu, QToolTip
 
 from circuitsim.canvas.component_item import ComponentItem
 from circuitsim.canvas.scene import CircuitScene
@@ -183,6 +184,26 @@ class CircuitView(QGraphicsView):
                 comp.name, comp.closed
             )
         return True
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            if isinstance(event, QHelpEvent):
+                scene_pt = self.mapToScene(event.pos())
+                term_hit = self.circuit_scene.find_terminal_near(scene_pt)
+                if term_hit is not None:
+                    item, tname, _ = term_hit
+                    tip = self.circuit_scene.get_terminal_tooltip(item, tname)
+                    QToolTip.showText(event.globalPos(), tip, self.viewport())
+                    return True
+                hit = self.itemAt(event.pos())
+                curr = hit
+                while curr is not None and not isinstance(curr, ComponentItem) and curr.parentItem() is not None:
+                    curr = curr.parentItem()
+                if isinstance(curr, ComponentItem):
+                    tip = self.circuit_scene.get_component_tooltip(curr)
+                    QToolTip.showText(event.globalPos(), tip, self.viewport())
+                    return True
+        return super().viewportEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         """Zoom smoothly around the cursor using the mouse wheel."""

@@ -165,6 +165,26 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 - **Step 4** (Canvas Integration of Explicit Wiring Model).
 - **Step 3C** (Full properties dialog) follows Step 4. Step 3A is done, and Step 3B is cancelled by design decision.
 
+## FLASH QUEUE
+
+### Phase 1: Quick Wins
+- [x] Task 1: Housekeeping (`.gitignore` `*.circ.bak`, `*.corrupt`; switch breakdown voltage contact arc hint; deterministic label collision avoidance) - *done (commit d67da36)*
+- [x] Task 2: Recent Files (`File > Open Recent`, 8 items, injected path, atomic persistence, missing file handling, Clear List) - *done (commit 1710f48)*
+- [x] Task 3: Example Circuits (`File > Examples` with 5 bundled circuits, package data, analytic tests) - *done (commit 7e29c9f)*
+- [x] Task 4: Zoom to fit (`View > Zoom to fit` `Ctrl+0`, shortcuts `F5`/`F6`/`Shift+F5`, info panel, invariant canvas) - *done (commit fb23c5b)*
+- [x] Task 5: Hover tooltips with live values (parts & terminals, stopped vs running, canvas invariance) - *done*
+- [ ] Task 6: Export schematic (`File > Export as PNG...` and `Export as SVG...`, white/theme options, tests) - *todo*
+- [ ] Task 7: About dialog (`Help > About`), feedback link (`Help > Report a problem / suggest a feature`), crash log exception hook - *todo*
+- [ ] Task 8: Bulb burn-out option (expose in dialog, dark+cross drawing, amber status note, open circuit) - *todo*
+- [ ] Task 9: Number format setting (`Edit > Preferences`, Auto/Dot/Comma display-only, persistence) - *todo*
+- [ ] Task 10: CI (`.github/workflows/ci.yml`, README status badge) - *todo*
+
+### Phase 2: Step 3C Full Properties Dialog
+- [ ] Step 3C: Full Properties Dialog (Identity, parameters, live readout, inductor helpers R_th, tau, 5tau, X_L, L calc) - *todo*
+
+### Phase 3: Oscilloscope Plan
+- [ ] Oscilloscope Plan (Step rate benchmarks, decoupled architecture, 3-chat split, risks; plan only, max 50 lines, await approval) - *todo*
+
 ### How to Run the App, Preview Tool, and Tests
 
 ```powershell

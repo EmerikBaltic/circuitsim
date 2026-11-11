@@ -201,6 +201,8 @@ class ComponentItem(QGraphicsObject):
         )
         self._lever_anim: QVariantAnimation | None = None
 
+        self.setToolTip(self.get_live_tooltip(is_running=False))
+
         if not is_ghost:
             self.setFlags(
                 QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -253,6 +255,41 @@ class ComponentItem(QGraphicsObject):
             self.setOpacity(0.45 if self.is_unconnected else 1.0)
         self.update()
 
+    def get_live_tooltip(self, is_running: bool = False) -> str:
+        """Return formatted live tooltip text for this component."""
+        lines: list[str] = []
+        if self.diagnostic_message:
+            lines.append(f"Problem: {self.diagnostic_message}")
+        lines.append(f"Name: {self.component.name}")
+        val_str = format_component_value_summary(self.component)
+        lines.append(f"Value: {val_str if val_str else '--'}")
+        if is_running:
+            lines.append(f"Voltage: {format_engineering_value(abs(self.component.voltage), 'V')}")
+            lines.append(f"Current: {format_engineering_value(abs(self.component.current), 'A')}")
+            is_src = isinstance(
+                self.component,
+                (DCVoltageSource, ACVoltageSource, DCCurrentSource),
+            )
+            if is_src:
+                p_val = self.component.power
+                p_str = format_engineering_value(p_val, "W")
+                if p_val < -1e-12:
+                    lines.append(f"Power: {p_str} (delivering)")
+                elif p_val > 1e-12:
+                    lines.append(f"Power: {p_str} (absorbing)")
+                else:
+                    lines.append("Power: 0 W")
+                lines.append(
+                    "Positive power is absorbed; sources indicate delivered power."
+                )
+            else:
+                lines.append(f"Power: {format_engineering_value(self.component.power, 'W')}")
+        else:
+            lines.append("Voltage: --")
+            lines.append("Current: --")
+            lines.append("Power: --")
+        return "\n".join(lines)
+
     def set_diagnostic(
         self, severity: str | None, message: str = "", *, code: str = ""
     ) -> None:
@@ -266,7 +303,7 @@ class ComponentItem(QGraphicsObject):
         self.diagnostic_severity = severity
         self.diagnostic_message = message
         self.diagnostic_code = code
-        self.setToolTip(message if message else f"{self.component.name} ({self.metadata.display_name})")
+        self.setToolTip(self.get_live_tooltip(is_running=self.live_display_value is not None))
         self.update()
 
     def effective_highlight_color(self) -> str | None:
@@ -293,6 +330,7 @@ class ComponentItem(QGraphicsObject):
         elif isinstance(self.component, (Voltmeter, Ammeter)):
             self.component.has_reading = not telemetry.display_value.startswith("--")
 
+        self.setToolTip(self.get_live_tooltip(is_running=True))
         self.update()
 
     def reset_live_telemetry(self) -> None:
@@ -305,6 +343,7 @@ class ComponentItem(QGraphicsObject):
                 if self.component.closed
                 else self.OPEN_LEVER_ANGLE_DEG
             )
+        self.setToolTip(self.get_live_tooltip(is_running=False))
         self.update()
 
     def animate_switch_state(self, closed: bool, *, duration_ms: int = 110) -> None:

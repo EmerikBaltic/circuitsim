@@ -47,6 +47,7 @@ from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.wire_item import WireItem
 from circuitsim.components.base import Component
 from circuitsim.components.switch import Switch
+from circuitsim.dialogs.value_parser import format_engineering_value
 from circuitsim.engine.netlist import Circuit
 from circuitsim.engine.simulation_session import (
     SimulationFrame,
@@ -117,6 +118,10 @@ class CircuitScene(QGraphicsScene):
         # Internal clipboard for Copy / Cut / Paste
         self._clipboard: _ClipboardData | None = None
         self._paste_serial: int = 0
+
+        # Live simulation telemetry cache
+        self.latest_node_voltages: dict[str, float] = {}
+        self.is_simulation_running: bool = False
 
         self.setSceneRect(-2000.0, -2000.0, 4000.0, 4000.0)
         self.selectionChanged.connect(self._on_selection_changed)
@@ -1022,9 +1027,13 @@ class CircuitScene(QGraphicsScene):
     def apply_simulation_frame(self, frame: SimulationFrame) -> None:
         """Apply telemetry and problem diagnostics from a `SimulationFrame` to canvas items."""
         if frame.state in (SimulationState.STOPPED, SimulationState.ERROR):
+            self.latest_node_voltages = {}
+            self.is_simulation_running = False
             for item in self._placed_items:
                 item.reset_live_telemetry()
         else:
+            self.latest_node_voltages = dict(frame.node_voltages)
+            self.is_simulation_running = True
             for item in self._placed_items:
                 telem = frame.components.get(item.component.name)
                 if telem is not None:
@@ -1067,6 +1076,25 @@ class CircuitScene(QGraphicsScene):
         ]
         if selected:
             self.selection_info_changed.emit(selected[0])
+
+    def get_component_tooltip(self, item: ComponentItem) -> str:
+        """Return the live tooltip for a component item based on current simulation state."""
+        return item.get_live_tooltip(is_running=self.is_simulation_running)
+
+    def get_terminal_tooltip(self, item: ComponentItem, terminal_name: str) -> str:
+        """Return the live tooltip for a component terminal (terminal name, net name, node voltage)."""
+        conn = self.extract_connectivity_result()
+        net_name = conn.component_nodes.get(item.component.name, {}).get(terminal_name, "--")
+        lines = [
+            f"Terminal: {terminal_name}",
+            f"Net: {net_name}",
+        ]
+        if self.is_simulation_running and self.latest_node_voltages and net_name in self.latest_node_voltages:
+            v = self.latest_node_voltages[net_name]
+            lines.append(f"Node voltage: {format_engineering_value(v, 'V')}")
+        else:
+            lines.append("Node voltage: --")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Save / Load (.circ) support
