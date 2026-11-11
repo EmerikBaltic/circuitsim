@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from circuitsim.components.base import Component, ComponentParameter
+from circuitsim.components.lightbulb import Lightbulb
 from circuitsim.components.switch import Switch
 from circuitsim.dialogs.value_parser import (
     format_engineering_value,
@@ -131,6 +132,37 @@ class QuickValueDialog(QDialog):
             self.switch_closed_cb.setChecked(component.closed)
             form.addRow("State:", self.switch_closed_cb)
 
+        self.bulb_burnout_cb: QCheckBox | None = None
+        self.burnout_ratio_edit: QLineEdit | None = None
+        self.burnout_time_edit: QLineEdit | None = None
+        if isinstance(component, Lightbulb):
+            self.bulb_burnout_cb = QCheckBox("Enable burn-out on overload")
+            self.bulb_burnout_cb.setObjectName("bulb_burnout_cb")
+            self.bulb_burnout_cb.setChecked(component.burnout_enabled)
+            form.addRow("Burn-out:", self.bulb_burnout_cb)
+
+            burnout_hint_lbl = QLabel(
+                "Simplified burn-out model: if dissipated power exceeds "
+                "rated power by this ratio for the specified duration, "
+                "the filament burns out and becomes an open circuit."
+            )
+            burnout_hint_lbl.setObjectName("bulb_burnout_hint_label")
+            burnout_hint_lbl.setWordWrap(True)
+            burnout_hint_lbl.setStyleSheet(
+                "color: #8B949E; font-size: 11px; font-style: italic;"
+            )
+            form.addRow("", burnout_hint_lbl)
+
+            self.burnout_ratio_edit = QLineEdit(str(component.burnout_power_ratio))
+            self.burnout_ratio_edit.setObjectName("burnout_ratio_edit")
+            form.addRow("Burn-out Power Ratio:", self.burnout_ratio_edit)
+
+            self.burnout_time_edit = QLineEdit(
+                format_engineering_value(component.burnout_time, "s")
+            )
+            self.burnout_time_edit.setObjectName("burnout_time_edit")
+            form.addRow("Burn-out Duration:", self.burnout_time_edit)
+
         self.show_value_cb = QCheckBox("Show value on schematic canvas")
         self.show_value_cb.setChecked(component.show_value)
         form.addRow("Display:", self.show_value_cb)
@@ -213,6 +245,26 @@ class QuickValueDialog(QDialog):
                     f"{spec.label} cannot be negative (got {raw_text!r}).",
                 )
             parsed_map[spec.key] = val
+
+        if isinstance(self.component, Lightbulb):
+            if self.bulb_burnout_cb is not None:
+                parsed_map["burnout_enabled"] = 1.0 if self.bulb_burnout_cb.isChecked() else 0.0
+            if self.burnout_ratio_edit is not None:
+                try:
+                    ratio = float(self.burnout_ratio_edit.text().strip())
+                    if ratio <= 1.0:
+                        return None, "Burn-out power ratio must be greater than 1.0."
+                    parsed_map["burnout_power_ratio"] = ratio
+                except ValueError:
+                    return None, f"Invalid burn-out power ratio: {self.burnout_ratio_edit.text()!r}"
+            if self.burnout_time_edit is not None:
+                try:
+                    t_burn = parse_engineering_value(self.burnout_time_edit.text().strip())
+                    if t_burn <= 0.0:
+                        return None, "Burn-out duration must be greater than 0 s."
+                    parsed_map["burnout_time"] = t_burn
+                except ValueError as exc:
+                    return None, f"Invalid burn-out duration: {exc}"
 
         return parsed_map, None
 

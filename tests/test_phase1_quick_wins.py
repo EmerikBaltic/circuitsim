@@ -784,5 +784,148 @@ print("TASK7_OK")
     assert "TASK7_OK" in res.stdout
 
 
+def test_task8_bulb_burnout_option() -> None:
+    """Task 8: Lightbulb filament burn-out option.
+
+    Hand-calculated verification:
+        - 60 W, 120 V incandescent bulb has R_hot = V^2 / P = 14400 / 60 = 240 Ω.
+        - Powered by 180 V DC source:
+            * Current I = 180 V / 240 Ω = 0.75 A.
+            * Power P = 180 V * 0.75 A = 135 W.
+            * Power ratio P / P_rated = 135 / 60 = 2.25 = 225%.
+            * With burnout_power_ratio = 1.2 (120%) and burnout_time = 0.5 s:
+              Overload threshold (120%) is exceeded by 225% power.
+            * For t < 0.5 s: bulb stays lit and conducts 0.75 A.
+            * After t >= 0.5 s: bulb burns out, model becomes open circuit (R = 1 GΩ),
+              current drops to 180 V / 1e9 Ω = 1.8e-7 A ≈ 0 A.
+            * Canvas diagnostic shows amber status warning: 'B1 burned out'.
+            * When simulation stops, burnout resets.
+        - At rated 120 V (100% power): never burns out.
+        - At 180 V with burnout disabled: never burns out.
+        - QuickValueDialog exposes burnout checkbox (default unchecked) and explanatory hint.
+    """
+    script = """
+import sys
+from PySide6.QtCore import QPointF
+from PySide6.QtWidgets import QApplication, QLabel
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.components import DCVoltageSource, Ground, Lightbulb
+from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+from circuitsim.engine import Circuit
+from circuitsim.engine.simulation_session import SimulationSession
+
+app = QApplication.instance() or QApplication([])
+
+# 1. Dialog checks: off by default, hint present, values apply
+b_test = Lightbulb("B_dlg", "1", "0", rated_power=60.0, rated_voltage=120.0)
+dlg = QuickValueDialog(b_test)
+assert dlg.bulb_burnout_cb is not None
+assert dlg.bulb_burnout_cb.isChecked() is False, "burnout_enabled must be off by default"
+assert dlg.burnout_ratio_edit is not None
+assert dlg.burnout_time_edit is not None
+
+labels = dlg.findChildren(QLabel)
+assert any("burn-out" in l.text().lower() or "filament" in l.text().lower() for l in labels)
+
+dlg.bulb_burnout_cb.setChecked(True)
+dlg.burnout_ratio_edit.setText("1.2")
+dlg.burnout_time_edit.setText("0.5s")
+assert dlg._apply_current_inputs()
+assert b_test.burnout_enabled is True
+assert b_test.burnout_power_ratio == 1.2
+assert b_test.burnout_time == 0.5
+
+# 2. Hand-calculated 180 V overload with burnout enabled
+# R = 120^2 / 60 = 240 Ω
+# At 180 V: I = 180 / 240 = 0.75 A, P = 135 W (225% of 60 W)
+# Burnout duration = 0.5 s
+c_overload = Circuit()
+c_overload.add(DCVoltageSource("V1", "1", "0", voltage=180.0))
+bulb_overload = Lightbulb(
+    "B1", "1", "0",
+    rated_power=60.0,
+    rated_voltage=120.0,
+    burnout_enabled=True,
+    burnout_power_ratio=1.2,
+    burnout_time=0.5,
+)
+c_overload.add(bulb_overload)
+c_overload.add(Ground("GND", "0"))
+
+sess = SimulationSession(c_overload, default_dt=0.05)
+sess.start()
+
+# Step 0.4 s (8 steps) -> still conducting 0.75 A
+for _ in range(8):
+    frame = sess.step_chunk(steps=1, dt=0.05)
+assert bulb_overload.burned_out is False
+assert abs(bulb_overload.current - 0.75) < 1e-3
+
+# Step past 0.5 s (4 more steps = 0.6 s total) -> filament burns out!
+for _ in range(4):
+    frame = sess.step_chunk(steps=1, dt=0.05)
+
+assert bulb_overload.burned_out is True
+assert abs(bulb_overload.current) < 1e-6, f"Current must drop to ~0 A, got {bulb_overload.current}"
+
+# Check amber status note
+burn_diags = [d for d in frame.diagnostics if d.code == "bulb_burned_out"]
+assert len(burn_diags) == 1
+assert burn_diags[0].severity == "warning"
+assert burn_diags[0].message == "B1 burned out"
+
+# Stopping simulation resets burnout state
+sess.stop()
+assert bulb_overload.burned_out is False
+
+# 3. Hand-calculated check at rated 120 V: P = 60 W (100% <= 120%) -> never burns out
+c_rated = Circuit()
+c_rated.add(DCVoltageSource("V1", "1", "0", voltage=120.0))
+bulb_rated = Lightbulb(
+    "B2", "1", "0",
+    rated_power=60.0,
+    rated_voltage=120.0,
+    burnout_enabled=True,
+    burnout_power_ratio=1.2,
+    burnout_time=0.5,
+)
+c_rated.add(bulb_rated)
+c_rated.add(Ground("GND", "0"))
+sess_rated = SimulationSession(c_rated, default_dt=0.05)
+sess_rated.start()
+for _ in range(20):
+    sess_rated.step_chunk(steps=1, dt=0.05)
+assert bulb_rated.burned_out is False
+assert abs(bulb_rated.current - 0.5) < 1e-3
+
+# 4. Hand-calculated check at 180 V with burnout disabled -> never burns out
+c_dis = Circuit()
+c_dis.add(DCVoltageSource("V1", "1", "0", voltage=180.0))
+bulb_dis = Lightbulb(
+    "B3", "1", "0",
+    rated_power=60.0,
+    rated_voltage=120.0,
+    burnout_enabled=False,
+    burnout_power_ratio=1.2,
+    burnout_time=0.5,
+)
+c_dis.add(bulb_dis)
+c_dis.add(Ground("GND", "0"))
+sess_dis = SimulationSession(c_dis, default_dt=0.05)
+sess_dis.start()
+for _ in range(20):
+    sess_dis.step_chunk(steps=1, dt=0.05)
+assert bulb_dis.burned_out is False
+assert abs(bulb_dis.current - 0.75) < 1e-3
+
+print("TASK8_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK8_OK" in res.stdout
+
+
+
 
 

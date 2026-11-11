@@ -320,7 +320,13 @@ class SymbolLibrary:
         elif component_id == "lightbulb":
             # IEC lamp symbol: circle (r = 15) with diagonal cross ('X') inside
             painter.drawLine(QPointF(-40.0, 0.0), QPointF(-15.0, 0.0))
-            painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
+            if state == "burned_out":
+                painter.save()
+                painter.setBrush(QBrush(QColor(45, 45, 45)))
+                painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
+                painter.restore()
+            else:
+                painter.drawEllipse(QPointF(0.0, 0.0), 15.0, 15.0)
             painter.drawLine(QPointF(15.0, 0.0), QPointF(40.0, 0.0))
             d = 15.0 * 0.70710678
             painter.drawLine(QPointF(-d, -d), QPointF(d, d))

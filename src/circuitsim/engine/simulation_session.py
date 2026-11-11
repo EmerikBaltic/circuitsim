@@ -459,20 +459,30 @@ class SimulationSession:
                 )
             )
 
-        # Also check lightbulb over-brightness (> 100% rated power)
+        # Also check lightbulb burnout or over-brightness (> 100% rated power)
         for comp in self.circuit.components:
-            if isinstance(comp, Lightbulb) and comp.is_over_bright:
-                diags.append(
-                    ProblemDiagnostic(
-                        code="over_bright",
-                        severity="warning",
-                        message=(
-                            f"Lightbulb {comp.name} overloaded "
-                            f"({comp.brightness_percent:.0f}% of rated {comp.rated_power:g} W)"
-                        ),
-                        component_names=(comp.name,),
+            if isinstance(comp, Lightbulb):
+                if comp.burned_out:
+                    diags.append(
+                        ProblemDiagnostic(
+                            code="bulb_burned_out",
+                            severity="warning",
+                            message=f"{comp.name} burned out",
+                            component_names=(comp.name,),
+                        )
                     )
-                )
+                elif comp.is_over_bright:
+                    diags.append(
+                        ProblemDiagnostic(
+                            code="over_bright",
+                            severity="warning",
+                            message=(
+                                f"Lightbulb {comp.name} overloaded "
+                                f"({comp.brightness_percent:.0f}% of rated {comp.rated_power:g} W)"
+                            ),
+                            component_names=(comp.name,),
+                        )
+                    )
 
         # Report any completely unconnected schematic components (ignored by solver)
         if self._connectivity is not None:

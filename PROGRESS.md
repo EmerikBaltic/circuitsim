@@ -174,8 +174,8 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 - [x] Task 4: Zoom to fit (`View > Zoom to fit` `Ctrl+0`, shortcuts `F5`/`F6`/`Shift+F5`, info panel, invariant canvas) - *done (commit fb23c5b)*
 - [x] Task 5: Hover tooltips with live values (parts & terminals, stopped vs running, canvas invariance) - *done (commit 9c05b72)*
 - [x] Task 6: Export schematic (`File > Export as PNG...` and `Export as SVG...`, white/theme options, tests) - *done (commit 7700a43)*
-- [x] Task 7: About dialog (`Help > About`), feedback link (`Help > Report a problem / suggest a feature`), crash log exception hook - *done*
-- [ ] Task 8: Bulb burn-out option (expose in dialog, dark+cross drawing, amber status note, open circuit) - *todo*
+- [x] Task 7: About dialog (`Help > About`), feedback link (`Help > Report a problem / suggest a feature`), crash log exception hook - *done (commit f338754)*
+- [x] Task 8: Bulb burn-out option (expose in dialog, dark+cross drawing, amber status note, open circuit) - *done*
 - [ ] Task 9: Number format setting (`Edit > Preferences`, Auto/Dot/Comma display-only, persistence) - *todo*
 - [ ] Task 10: CI (`.github/workflows/ci.yml`, README status badge) - *todo*
 

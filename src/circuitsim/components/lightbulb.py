@@ -178,3 +178,30 @@ class Lightbulb(Component):
         self.temperature = 0.0 if self.use_filament_model else 1.0
         self.burned_out = False
         self._overload_duration = 0.0
+
+    def get_parameter_value(self, key: str) -> float:
+        """Return the numerical value of parameter `key`."""
+        if key == "burnout_enabled":
+            return 1.0 if self.burnout_enabled else 0.0
+        if key in ("burnout_power_ratio", "burnout_time"):
+            return float(getattr(self, key))
+        return super().get_parameter_value(key)
+
+    def set_parameter_value(self, key: str, raw_value: float | str) -> float:
+        """Set parameter `key` to `raw_value` and return parsed float."""
+        if key == "burnout_enabled":
+            self.burnout_enabled = bool(raw_value)
+            return 1.0 if self.burnout_enabled else 0.0
+        if key == "burnout_power_ratio":
+            val = float(raw_value)
+            if val <= 1.0:
+                raise ValueError(f"Lightbulb {self.name!r}: burnout_power_ratio must be > 1.0.")
+            self.burnout_power_ratio = val
+            return val
+        if key == "burnout_time":
+            val = parse_engineering_value(raw_value)
+            if val <= 0.0:
+                raise ValueError(f"Lightbulb {self.name!r}: burnout_time must be > 0 s.")
+            self.burnout_time = val
+            return val
+        return super().set_parameter_value(key, raw_value)
