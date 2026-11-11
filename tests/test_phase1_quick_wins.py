@@ -926,6 +926,106 @@ print("TASK8_OK")
     assert "TASK8_OK" in res.stdout
 
 
+def test_task9_number_format_setting() -> None:
+    """Task 9: Number format preferences (Auto / Dot / Comma).
+
+    Verifications in a single offscreen Qt subprocess:
+        - Preferences dialog has Number format options: Automatic, Dot, Comma.
+        - Dot mode formats:
+          * 4700 -> "4.7 kΩ"
+          * 0.0047 -> "4.7 mΩ"
+          * 5.65e9 -> "5.65 GHz"
+          * -12.5 -> "-12.5 V"
+        - Comma mode formats:
+          * 4700 -> "4,7 kΩ"
+          * 0.0047 -> "4,7 mΩ"
+          * 5.65e9 -> "5,65 GHz"
+          * -12.5 -> "-12,5 V"
+        - Round-trip parsing: both displayed dot and comma strings parse back to identical values.
+        - Changes persist atomically in AppSettings.
+        - MainWindow has Edit > Preferences action.
+    """
+    script = """
+import sys
+import tempfile
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.app.settings import AppSettings
+from circuitsim.dialogs.preferences_dialog import PreferencesDialog
+from circuitsim.dialogs.value_parser import (
+    format_engineering_value,
+    get_global_number_format,
+    parse_engineering_value,
+    set_global_number_format,
+)
+
+app = QApplication.instance() or QApplication([])
+
+# 1. Format test: Dot mode
+set_global_number_format("dot")
+assert format_engineering_value(4700.0, "Ω") == "4.7 kΩ"
+assert format_engineering_value(0.0047, "Ω") == "4.7 mΩ"
+assert format_engineering_value(5.65e9, "Hz") == "5.65 GHz"
+assert format_engineering_value(-12.5, "V") == "-12.5 V"
+
+# 2. Format test: Comma mode
+set_global_number_format("comma")
+assert format_engineering_value(4700.0, "Ω") == "4,7 kΩ"
+assert format_engineering_value(0.0047, "Ω") == "4,7 mΩ"
+assert format_engineering_value(5.65e9, "Hz") == "5,65 GHz"
+assert format_engineering_value(-12.5, "V") == "-12,5 V"
+
+# 3. Round-trip input parser verification (accepts both dot and comma in all modes)
+test_cases = [
+    (4700.0, "Ω"),
+    (0.0047, "Ω"),
+    (5.65e9, "Hz"),
+    (-12.5, "V"),
+]
+for val, unit in test_cases:
+    dot_str = format_engineering_value(val, unit, decimal_separator=".")
+    comma_str = format_engineering_value(val, unit, decimal_separator=",")
+    assert parse_engineering_value(dot_str) == val, f"Failed parsing dot string {dot_str}"
+    assert parse_engineering_value(comma_str) == val, f"Failed parsing comma string {comma_str}"
+
+# 4. Preferences dialog and atomic persistence
+with tempfile.TemporaryDirectory() as tmp:
+    s = AppSettings(tmp)
+    dlg = PreferencesDialog(s)
+    assert dlg.combo_number_format.count() >= 3
+
+    # Switch to comma mode
+    idx_comma = dlg.combo_number_format.findData("comma")
+    dlg.combo_number_format.setCurrentIndex(idx_comma)
+    dlg._on_accept()
+    assert s.get_number_format() == "comma"
+    assert get_global_number_format() == "comma"
+
+    # Verify persistence on disk reload
+    s_reloaded = AppSettings(tmp)
+    assert s_reloaded.get_number_format() == "comma"
+
+# 5. Verify MainWindow action
+win = MainWindow()
+assert win.act_preferences is not None
+assert "Preferences" in win.act_preferences.text()
+
+scene = win.circuit_scene
+scene.undo_stack.setClean()
+win._switch_modified = False
+
+# Reset back to dot for clean test environment
+set_global_number_format("dot")
+print("TASK9_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK9_OK" in res.stdout
+
+
+
 
 
 

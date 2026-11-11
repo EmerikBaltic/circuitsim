@@ -219,15 +219,48 @@ def parse_spice_value(text: str | float | int) -> float:
     return base_value * spice_multipliers[prefix]
 
 
+_CURRENT_NUMBER_FORMAT: str = "dot"  # "dot", "comma", or "auto"
+
+
+def set_global_number_format(mode: str) -> None:
+    """Set the application-wide number format ('dot', 'comma', or 'auto')."""
+    global _CURRENT_NUMBER_FORMAT
+    if mode in ("dot", "comma", "auto"):
+        _CURRENT_NUMBER_FORMAT = mode
+
+
+def get_global_number_format() -> str:
+    """Return the active application-wide number format setting."""
+    return _CURRENT_NUMBER_FORMAT
+
+
+def get_active_decimal_separator(override: str | None = None) -> str:
+    """Return '.' or ',' depending on active number format setting."""
+    fmt = override or _CURRENT_NUMBER_FORMAT
+    if fmt == "comma":
+        return ","
+    if fmt == "dot":
+        return "."
+    # auto: check system locale
+    import locale
+
+    try:
+        loc_sep = locale.localeconv().get("decimal_point", ".")
+        return "," if loc_sep == "," else "."
+    except Exception:
+        return "."
+
+
 def format_engineering_value(
     value: float,
     unit: str = "",
     sig_figs: int = 4,
+    decimal_separator: str | None = None,
 ) -> str:
     """Format a floating-point number using readable engineering prefixes.
 
     Examples:
-        format_engineering_value(4700.0, "Ω")  -> "4.7 kΩ"
+        format_engineering_value(4700.0, "Ω")  -> "4.7 kΩ" (or "4,7 kΩ")
         format_engineering_value(0.015, "A")   -> "15 mA"
         format_engineering_value(0.0, "V")     -> "0 V"
     """
@@ -261,6 +294,11 @@ def format_engineering_value(
 
     scaled = value / chosen_scale
     formatted_num = f"{scaled:.{sig_figs}g}"
+
+    sep = decimal_separator or get_active_decimal_separator()
+    if sep == ",":
+        formatted_num = formatted_num.replace(".", ",")
+
     unit_part = f"{chosen_prefix}{unit}"
     if unit_part:
         return f"{formatted_num} {unit_part}"

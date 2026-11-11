@@ -45,7 +45,11 @@ from circuitsim.canvas.scene import CircuitScene
 from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.view import CircuitView
 from circuitsim.components.lightbulb import Lightbulb
-from circuitsim.dialogs.value_parser import format_engineering_value
+from circuitsim.dialogs.preferences_dialog import PreferencesDialog
+from circuitsim.dialogs.value_parser import (
+    format_engineering_value,
+    set_global_number_format,
+)
 from circuitsim.io.circ_serializer import (
     CircuitFileError,
     ViewState,
@@ -100,6 +104,7 @@ class MainWindow(QMainWindow):
         self.settings: AppSettings = (
             settings if settings is not None else AppSettings()
         )
+        set_global_number_format(self.settings.get_number_format())
         self.theme: ThemeMode = initial_theme
         self.symbol_library = SymbolLibrary()
         self.circuit_scene = CircuitScene(self.symbol_library, theme=self.theme)
@@ -270,6 +275,12 @@ class MainWindow(QMainWindow):
             )
         )
         edit_menu.addAction(self.act_junction)
+
+        edit_menu.addSeparator()
+        self.act_preferences = QAction("&Preferences...", self)
+        self.act_preferences.setToolTip("Application preferences (number format, etc.)")
+        self.act_preferences.triggered.connect(self._open_preferences_dialog)
+        edit_menu.addAction(self.act_preferences)
 
         # View menu
         self.view_menu = menu_bar.addMenu("&View")
@@ -792,6 +803,15 @@ class MainWindow(QMainWindow):
             f"<p><b>Report Issues / Feedback:</b> <a href='{ISSUES_URL}'>{ISSUES_URL}</a></p>"
         )
         QMessageBox.about(self, "About CircuitSim", text)
+
+    def _open_preferences_dialog(self) -> None:
+        dlg = PreferencesDialog(self.settings, self)
+        if dlg.exec() == PreferencesDialog.DialogCode.Accepted:
+            self.circuit_scene.update()
+            self.statusBar().showMessage(
+                f"Preferences saved (number format: {self.settings.get_number_format()})",
+                3000,
+            )
 
     def _update_recent_files_menu(self) -> None:
         self.recent_menu.clear()
