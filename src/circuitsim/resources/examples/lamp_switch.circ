@@ -1,0 +1,259 @@
+{
+  "format": "circuitsim",
+  "schema_version": 1,
+  "components": [
+    {
+      "type": "dc_voltage",
+      "name": "V1",
+      "label": "V1",
+      "show_value": true,
+      "center_px": [
+        -100.0,
+        0.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "dc_voltage": 12.0,
+        "r_internal": 0.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "switch",
+      "name": "SW1",
+      "label": "SW1",
+      "show_value": true,
+      "center_px": [
+        0.0,
+        -40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "r_on": 0.001,
+        "v_breakdown": 350.0
+      },
+      "settings": {
+        "closed": true,
+        "r_off": 1000000000.0,
+        "c_parasitic": 1e-11,
+        "toggle_time": null
+      }
+    },
+    {
+      "type": "ammeter",
+      "name": "AM1",
+      "label": "AM1",
+      "show_value": true,
+      "center_px": [
+        100.0,
+        -40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "r_internal": 0.001
+      },
+      "settings": {
+        "mode": "instantaneous"
+      }
+    },
+    {
+      "type": "lightbulb",
+      "name": "B1",
+      "label": "B1",
+      "show_value": true,
+      "center_px": [
+        100.0,
+        40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "rated_power": 5.0,
+        "rated_voltage": 12.0
+      },
+      "settings": {
+        "use_filament_model": false,
+        "burnout_enabled": false
+      }
+    },
+    {
+      "type": "voltmeter",
+      "name": "VM1",
+      "label": "VM1",
+      "show_value": true,
+      "center_px": [
+        200.0,
+        40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "r_internal": 10000000.0
+      },
+      "settings": {
+        "mode": "instantaneous"
+      }
+    },
+    {
+      "type": "ground",
+      "name": "GND1",
+      "label": "GND1",
+      "show_value": true,
+      "center_px": [
+        -100.0,
+        80.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {},
+      "settings": {}
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1",
+      "points": [
+        [
+          -100.0,
+          -40.0
+        ],
+        [
+          -40.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W2",
+      "points": [
+        [
+          40.0,
+          -40.0
+        ],
+        [
+          60.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W3",
+      "points": [
+        [
+          140.0,
+          -40.0
+        ],
+        [
+          160.0,
+          -40.0
+        ],
+        [
+          160.0,
+          0.0
+        ],
+        [
+          40.0,
+          0.0
+        ],
+        [
+          40.0,
+          40.0
+        ],
+        [
+          60.0,
+          40.0
+        ]
+      ]
+    },
+    {
+      "id": "W4",
+      "points": [
+        [
+          160.0,
+          -40.0
+        ],
+        [
+          160.0,
+          40.0
+        ]
+      ]
+    },
+    {
+      "id": "W5",
+      "points": [
+        [
+          -100.0,
+          40.0
+        ],
+        [
+          -100.0,
+          60.0
+        ]
+      ]
+    },
+    {
+      "id": "W6",
+      "points": [
+        [
+          -100.0,
+          40.0
+        ],
+        [
+          -100.0,
+          100.0
+        ],
+        [
+          140.0,
+          100.0
+        ],
+        [
+          140.0,
+          40.0
+        ]
+      ]
+    },
+    {
+      "id": "W7",
+      "points": [
+        [
+          140.0,
+          100.0
+        ],
+        [
+          240.0,
+          100.0
+        ],
+        [
+          240.0,
+          40.0
+        ]
+      ]
+    }
+  ],
+  "junctions": [
+    [
+      160,
+      -40
+    ],
+    [
+      -100,
+      40
+    ],
+    [
+      140,
+      100
+    ]
+  ],
+  "view": {
+    "theme": "dark",
+    "zoom": 1.0,
+    "pan": [
+      0.0,
+      0.0
+    ],
+    "simulation_speed": "1x"
+  }
+}

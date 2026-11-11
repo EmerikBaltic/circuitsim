@@ -219,3 +219,115 @@ print("TASK2_OK")
     assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
     assert "TASK2_OK" in res.stdout
 
+
+def test_task3_example_circuits() -> None:
+    """Task 3: Example circuits bundled in package data, index catalog,
+
+    analytic hand calculations for all 5 circuits, and UI menu loading as untitled.
+    """
+    import json
+    import math
+    from circuitsim.canvas.connectivity import extract_connectivity
+    from circuitsim.engine import MNASolver
+    from circuitsim.io.circ_serializer import load_document
+
+    ex_dir = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "circuitsim"
+        / "resources"
+        / "examples"
+    )
+    index_file = ex_dir / "index.json"
+    assert index_file.exists(), "index.json must exist in resources/examples"
+    catalog = json.loads(index_file.read_text(encoding="utf-8"))
+    assert len(catalog) == 5, f"Expected 5 bundled examples, found {len(catalog)}"
+
+    # 1. Voltage Divider
+    vd_doc = load_document(ex_dir / "voltage_divider.circ")
+    vd_conn = extract_connectivity(vd_doc.placed, vd_doc.wires, vd_doc.junctions)
+    vd_pt = MNASolver(vd_conn.circuit).solve_dc()
+    vm_comp = vd_conn.circuit.get_component("VM1")
+    v_vd = vd_pt.node_voltages[vm_comp.nodes[0]] - vd_pt.node_voltages[vm_comp.nodes[1]]
+    # Hand formula: V = 12 * 3000 / (1000 + 3000) = 9.0 V
+    expected_vd = 12.0 * (3000.0 / 4000.0)
+    assert math.isclose(v_vd, expected_vd, rel_tol=1e-3, abs_tol=1e-3)
+
+    # 2. RC Charging
+    rc_doc = load_document(ex_dir / "rc_charging.circ")
+    rc_conn = extract_connectivity(rc_doc.placed, rc_doc.wires, rc_doc.junctions)
+    rc_solver = MNASolver(rc_conn.circuit)
+    # Hand formula: tau = 1000 * 100e-6 = 0.1 s; v(t) = 5 * (1 - e^(-t / 0.1))
+    rc_res = rc_solver.solve_transient(duration=0.1, dt=0.0005)
+    c_comp = rc_conn.circuit.get_component("C1")
+    v_rc = (
+        rc_res.node_voltages[c_comp.nodes[0]][-1]
+        - rc_res.node_voltages[c_comp.nodes[1]][-1]
+    )
+    expected_rc = 5.0 * (1.0 - math.exp(-1.0))
+    assert math.isclose(v_rc, expected_rc, rel_tol=1e-3, abs_tol=1e-3)
+
+    # 3. RL Current Rise
+    rl_doc = load_document(ex_dir / "rl_current_rise.circ")
+    rl_conn = extract_connectivity(rl_doc.placed, rl_doc.wires, rl_doc.junctions)
+    rl_solver = MNASolver(rl_conn.circuit)
+    # Hand formula: tau = 0.1 / (100 + 10) = 0.1 / 110 s; i(t) = (12/110) * (1 - e^(-t / tau))
+    tau = 0.1 / 110.0
+    rl_res = rl_solver.solve_transient(duration=tau, dt=tau / 200.0)
+    am_comp = rl_conn.circuit.get_component("AM1")
+    i_rl = abs(rl_res.branch_currents[am_comp.name][-1])
+    expected_rl = (12.0 / 110.0) * (1.0 - math.exp(-1.0))
+    assert math.isclose(i_rl, expected_rl, rel_tol=1e-3, abs_tol=1e-4)
+
+    # 4. 12 V Lamp with Switch
+    lamp_doc = load_document(ex_dir / "lamp_switch.circ")
+    lamp_conn = extract_connectivity(lamp_doc.placed, lamp_doc.wires, lamp_doc.junctions)
+    lamp_pt = MNASolver(lamp_conn.circuit).solve_dc()
+    am_lamp = lamp_conn.circuit.get_component("AM1")
+    i_lamp = abs(lamp_pt.branch_currents[am_lamp.name])
+    # Hand formula: I = P / V = 5 W / 12 V = 0.4166667 A
+    expected_lamp = 5.0 / 12.0
+    assert math.isclose(i_lamp, expected_lamp, rel_tol=1e-3, abs_tol=1e-4)
+
+    # 5. Two 12 V sources in series
+    series_doc = load_document(ex_dir / "series_sources.circ")
+    series_conn = extract_connectivity(series_doc.placed, series_doc.wires, series_doc.junctions)
+    series_pt = MNASolver(series_conn.circuit).solve_dc()
+    vm_series = series_conn.circuit.get_component("VM1")
+    v_series = (
+        series_pt.node_voltages[vm_series.nodes[0]]
+        - series_pt.node_voltages[vm_series.nodes[1]]
+    )
+    # Hand formula: V = 12 V + 12 V = 24.0 V
+    assert math.isclose(v_series, 24.0, rel_tol=1e-3, abs_tol=1e-3)
+
+    # 6. UI Menu check in Qt subprocess
+    script = """
+import sys
+from PySide6.QtWidgets import QApplication
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication.instance() or QApplication([])
+win = MainWindow()
+
+ex_menu = win.examples_menu
+actions = ex_menu.actions()
+assert len(actions) == 5, f"Expected 5 example actions, got {len(actions)}"
+
+# Verify first action is Voltage Divider
+act0 = actions[0]
+assert "Voltage Divider" in act0.text()
+assert len(act0.toolTip()) > 5
+
+# Trigger action 0 to load example
+act0.trigger()
+assert win._current_path is None, "Example must open as a NEW untitled circuit"
+assert "Untitled" in win.windowTitle(), f"Title must be Untitled, got {win.windowTitle()}"
+assert len(win.circuit_scene.placed_items) >= 4, "Loaded example must have components on canvas"
+
+print("TASK3_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK3_OK" in res.stdout
+

@@ -1,0 +1,149 @@
+{
+  "format": "circuitsim",
+  "schema_version": 1,
+  "components": [
+    {
+      "type": "dc_voltage",
+      "name": "V1",
+      "label": "V1",
+      "show_value": true,
+      "center_px": [
+        -80.0,
+        -40.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "dc_voltage": 12.0,
+        "r_internal": 0.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "dc_voltage",
+      "name": "V2",
+      "label": "V2",
+      "show_value": true,
+      "center_px": [
+        -80.0,
+        40.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "dc_voltage": 12.0,
+        "r_internal": 0.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "voltmeter",
+      "name": "VM1",
+      "label": "VM1",
+      "show_value": true,
+      "center_px": [
+        40.0,
+        0.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "r_internal": 10000000.0
+      },
+      "settings": {
+        "mode": "instantaneous"
+      }
+    },
+    {
+      "type": "ground",
+      "name": "GND1",
+      "label": "GND1",
+      "show_value": true,
+      "center_px": [
+        -80.0,
+        120.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {},
+      "settings": {}
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1",
+      "points": [
+        [
+          -80.0,
+          -80.0
+        ],
+        [
+          40.0,
+          -80.0
+        ],
+        [
+          40.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W2",
+      "points": [
+        [
+          -80.0,
+          0.0
+        ],
+        [
+          -80.0,
+          0.0
+        ]
+      ]
+    },
+    {
+      "id": "W3",
+      "points": [
+        [
+          -80.0,
+          80.0
+        ],
+        [
+          -80.0,
+          100.0
+        ]
+      ]
+    },
+    {
+      "id": "W4",
+      "points": [
+        [
+          -80.0,
+          80.0
+        ],
+        [
+          40.0,
+          80.0
+        ],
+        [
+          40.0,
+          40.0
+        ]
+      ]
+    }
+  ],
+  "junctions": [
+    [
+      -80,
+      80
+    ]
+  ],
+  "view": {
+    "theme": "dark",
+    "zoom": 1.0,
+    "pan": [
+      0.0,
+      0.0
+    ],
+    "simulation_speed": "1x"
+  }
+}

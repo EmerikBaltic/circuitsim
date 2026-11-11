@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QPointF, Qt
@@ -141,6 +142,9 @@ class MainWindow(QMainWindow):
 
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self._update_recent_files_menu()
+
+        self.examples_menu = file_menu.addMenu("&Examples")
+        self._build_examples_menu()
 
         self.act_save = QAction("&Save", self)
         self.act_save.setIconText("Save")
@@ -708,6 +712,55 @@ class MainWindow(QMainWindow):
             return
 
         self.open_path(p)
+
+    def _build_examples_menu(self) -> None:
+        self.examples_menu.clear()
+        ex_dir = Path(__file__).resolve().parent.parent / "resources" / "examples"
+        index_file = ex_dir / "index.json"
+        if not index_file.exists():
+            return
+        try:
+            with open(index_file, "r", encoding="utf-8") as f:
+                catalog = json.load(f)
+        except Exception:
+            return
+
+        for item in catalog:
+            title = item.get("title", "Example")
+            desc = item.get("description", "")
+            fname = item.get("filename", "")
+            act = QAction(title, self)
+            act.setToolTip(desc)
+            act.setStatusTip(desc)
+            act.triggered.connect(
+                lambda _checked=False, p=ex_dir / fname, t=title: self._on_open_example(p, t)
+            )
+            self.examples_menu.addAction(act)
+
+    def _on_open_example(self, path: Path, title: str) -> None:
+        if not self._confirm_discard_changes("opening an example circuit"):
+            return
+
+        try:
+            doc = load_document(path)
+            self.circuit_scene.load_document(doc)
+        except Exception as exc:
+            self._show_error("Could not load example", f"Failed to load example circuit: {exc}")
+            return
+
+        self.stop_simulation()
+        if doc.view.theme != self.theme.value:
+            self.apply_theme(ThemeMode(doc.view.theme))
+        idx = self.speed_combo.findData(doc.view.simulation_speed)
+        if idx >= 0:
+            self.speed_combo.setCurrentIndex(idx)
+        self.circuit_view.set_view_state(doc.view.zoom, doc.view.pan)
+
+        # Open as a NEW untitled circuit so bundled files cannot be overwritten
+        self._current_path = None
+        self._switch_modified = False
+        self._update_window_title()
+        self.statusBar().showMessage(f"Loaded example: {title}", 4000)
 
     def _on_speed_combo_changed(self, index: int) -> None:
         raw = self.speed_combo.itemData(index)

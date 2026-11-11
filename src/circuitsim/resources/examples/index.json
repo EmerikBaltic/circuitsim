@@ -1,0 +1,32 @@
+[
+  {
+    "id": "voltage_divider",
+    "title": "Voltage Divider (12 V, 1 k\u03a9 / 3 k\u03a9)",
+    "description": "DC voltage division across two series resistors producing a 9 V output.",
+    "filename": "voltage_divider.circ"
+  },
+  {
+    "id": "rc_charging",
+    "title": "RC Charging (5 V, 1 k\u03a9, 100 \u00b5F)",
+    "description": "Exponential capacitor charging transient response with a time constant of 0.1 s.",
+    "filename": "rc_charging.circ"
+  },
+  {
+    "id": "rl_current_rise",
+    "title": "RL Current Rise (12 V, 100 \u03a9, 100 mH)",
+    "description": "Inductive current rise step response with 10 \u03a9 coil winding resistance (tau = 0.91 ms).",
+    "filename": "rl_current_rise.circ"
+  },
+  {
+    "id": "lamp_switch",
+    "title": "12 V Lamp with Switch (5 W Bulb)",
+    "description": "Switched 12 V incandescent lamp circuit drawing 416.7 mA when the switch is closed.",
+    "filename": "lamp_switch.circ"
+  },
+  {
+    "id": "series_sources",
+    "title": "Series Voltage Sources (12 V + 12 V)",
+    "description": "Two 12 V DC voltage sources wired in series aiding to produce 24 V.",
+    "filename": "series_sources.circ"
+  }
+]

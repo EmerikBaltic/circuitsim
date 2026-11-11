@@ -1,0 +1,194 @@
+{
+  "format": "circuitsim",
+  "schema_version": 1,
+  "components": [
+    {
+      "type": "dc_voltage",
+      "name": "V1",
+      "label": "V1",
+      "show_value": true,
+      "center_px": [
+        -100.0,
+        0.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "dc_voltage": 12.0,
+        "r_internal": 0.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "ammeter",
+      "name": "AM1",
+      "label": "AM1",
+      "show_value": true,
+      "center_px": [
+        -40.0,
+        -40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "r_internal": 0.001
+      },
+      "settings": {
+        "mode": "instantaneous"
+      }
+    },
+    {
+      "type": "resistor",
+      "name": "R1",
+      "label": "R1",
+      "show_value": true,
+      "center_px": [
+        60.0,
+        -40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "resistance": 100.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "inductor",
+      "name": "L1",
+      "label": "L1",
+      "show_value": true,
+      "center_px": [
+        60.0,
+        40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "inductance": 0.1,
+        "dcr": 10.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "ground",
+      "name": "GND1",
+      "label": "GND1",
+      "show_value": true,
+      "center_px": [
+        -100.0,
+        80.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {},
+      "settings": {}
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1",
+      "points": [
+        [
+          -100.0,
+          -40.0
+        ],
+        [
+          -80.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W2",
+      "points": [
+        [
+          0.0,
+          -40.0
+        ],
+        [
+          20.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W3",
+      "points": [
+        [
+          100.0,
+          -40.0
+        ],
+        [
+          120.0,
+          -40.0
+        ],
+        [
+          120.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          40.0
+        ],
+        [
+          20.0,
+          40.0
+        ]
+      ]
+    },
+    {
+      "id": "W4",
+      "points": [
+        [
+          -100.0,
+          40.0
+        ],
+        [
+          -100.0,
+          60.0
+        ]
+      ]
+    },
+    {
+      "id": "W5",
+      "points": [
+        [
+          -100.0,
+          40.0
+        ],
+        [
+          -100.0,
+          80.0
+        ],
+        [
+          100.0,
+          80.0
+        ],
+        [
+          100.0,
+          40.0
+        ]
+      ]
+    }
+  ],
+  "junctions": [
+    [
+      -100,
+      40
+    ]
+  ],
+  "view": {
+    "theme": "dark",
+    "zoom": 1.0,
+    "pan": [
+      0.0,
+      0.0
+    ],
+    "simulation_speed": "1x"
+  }
+}
