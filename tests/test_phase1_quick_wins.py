@@ -587,3 +587,116 @@ print("TASK5_OK")
     assert "TASK5_OK" in res.stdout
 
 
+def test_task6_export_schematic() -> None:
+    """Task 6: Export schematic as PNG and SVG.
+
+    Verifications in a single offscreen Qt subprocess:
+        - PNG dimensions = content bounds + 2 * margin (20 px margin on each side = +40 px).
+        - SVG is valid XML parsable by ElementTree, containing component names ("R1", "B1").
+        - Selection outlines, hover highlights, and ghost previews are excluded from render,
+          and previous canvas selection/hover state is restored after export.
+        - Export options dialog switches between ThemeMode.LIGHT and current theme.
+        - Empty schematic export gracefully returns None / False.
+    """
+    script = """
+import tempfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.app.themes import ThemeMode
+from circuitsim.canvas.export import (
+    ExportOptionsDialog,
+    compute_schematic_bounds,
+    export_schematic_to_image,
+    export_schematic_to_svg,
+)
+
+app = QApplication.instance() or QApplication([])
+win = MainWindow()
+scene = win.circuit_scene
+
+# 1. Empty circuit check
+assert compute_schematic_bounds(scene) is None
+assert export_schematic_to_image(scene) is None
+with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+    empty_svg_path = f.name
+assert export_schematic_to_svg(scene, empty_svg_path) is False
+
+# 2. Place components and wire
+r1 = scene.place_new_component("resistor", QPointF(-100.0, 0.0))
+b1 = scene.place_new_component("lightbulb", QPointF(100.0, 0.0))
+
+r1_term_b = r1.terminal_scene_positions_px()["b"]
+b1_term_a = b1.terminal_scene_positions_px()["a"]
+w1 = scene.add_wire((r1_term_b, b1_term_a))
+
+# Compute expected content bounds and export rect (+20 px margin on all sides)
+content_rect = QRectF()
+for it in scene.placed_items:
+    content_rect = content_rect.united(it.sceneBoundingRect())
+for w in scene.placed_wires:
+    content_rect = content_rect.united(w.sceneBoundingRect())
+
+margin = 20.0
+expected_w = int(round(content_rect.width() + 2 * margin))
+expected_h = int(round(content_rect.height() + 2 * margin))
+
+# Set active selection, hover highlight, and ghost item to ensure they are excluded
+r1.setSelected(True)
+assert r1.isSelected()
+scene.update_hover_highlight(QPointF(float(r1_term_b[0]), float(r1_term_b[1])))
+assert scene._hovered_terminal_pt is not None
+scene.show_ghost_preview("voltmeter", QPointF(0.0, 50.0))
+assert scene._ghost_item is not None
+
+# 3. Export to PNG
+img_white = export_schematic_to_image(scene, margin_px=margin, theme_mode=ThemeMode.LIGHT)
+assert img_white is not None
+assert img_white.width() == expected_w, f"Expected PNG width {expected_w}, got {img_white.width()}"
+assert img_white.height() == expected_h, f"Expected PNG height {expected_h}, got {img_white.height()}"
+
+# Assert state was restored after export
+assert r1.isSelected(), "Selection must be restored after export"
+assert scene._hovered_terminal_pt is not None, "Hover highlight must be restored after export"
+assert scene._ghost_item is not None and scene._ghost_item.isVisible(), "Ghost item visibility must be restored"
+
+# 4. Export to SVG
+with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
+    svg_path = f.name
+
+ok = export_schematic_to_svg(scene, svg_path, margin_px=margin, theme_mode=ThemeMode.LIGHT)
+assert ok is True
+
+svg_text = Path(svg_path).read_text(encoding="utf-8")
+tree = ET.fromstring(svg_text)
+assert tree.tag.endswith("svg"), f"Root tag must be SVG, got {tree.tag}"
+assert "R1" in svg_text, "SVG must contain component label 'R1'"
+assert "B1" in svg_text, "SVG must contain component label 'B1'"
+
+# 5. Export options dialog
+dlg = ExportOptionsDialog(ThemeMode.DARK)
+assert dlg.selected_theme_mode() == ThemeMode.LIGHT
+dlg.radio_current.setChecked(True)
+assert dlg.selected_theme_mode() == ThemeMode.DARK
+dlg.radio_white.setChecked(True)
+assert dlg.selected_theme_mode() == ThemeMode.LIGHT
+
+# 6. Verify menu actions exist in MainWindow
+assert win.act_export_png is not None
+assert win.act_export_svg is not None
+assert "PNG" in win.act_export_png.text()
+assert "SVG" in win.act_export_svg.text()
+
+scene.undo_stack.setClean()
+win._switch_modified = False
+print("TASK6_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK6_OK" in res.stdout
+
+
+

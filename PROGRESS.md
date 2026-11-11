@@ -172,8 +172,8 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 - [x] Task 2: Recent Files (`File > Open Recent`, 8 items, injected path, atomic persistence, missing file handling, Clear List) - *done (commit 1710f48)*
 - [x] Task 3: Example Circuits (`File > Examples` with 5 bundled circuits, package data, analytic tests) - *done (commit 7e29c9f)*
 - [x] Task 4: Zoom to fit (`View > Zoom to fit` `Ctrl+0`, shortcuts `F5`/`F6`/`Shift+F5`, info panel, invariant canvas) - *done (commit fb23c5b)*
-- [x] Task 5: Hover tooltips with live values (parts & terminals, stopped vs running, canvas invariance) - *done*
-- [ ] Task 6: Export schematic (`File > Export as PNG...` and `Export as SVG...`, white/theme options, tests) - *todo*
+- [x] Task 5: Hover tooltips with live values (parts & terminals, stopped vs running, canvas invariance) - *done (commit 9c05b72)*
+- [x] Task 6: Export schematic (`File > Export as PNG...` and `Export as SVG...`, white/theme options, tests) - *done*
 - [ ] Task 7: About dialog (`Help > About`), feedback link (`Help > Report a problem / suggest a feature`), crash log exception hook - *todo*
 - [ ] Task 8: Bulb burn-out option (expose in dialog, dark+cross drawing, amber status note, open circuit) - *todo*
 - [ ] Task 9: Number format setting (`Edit > Preferences`, Auto/Dot/Comma display-only, persistence) - *todo*

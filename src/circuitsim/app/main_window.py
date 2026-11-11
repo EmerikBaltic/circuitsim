@@ -31,6 +31,11 @@ from circuitsim.canvas.component_item import (
     ComponentItem,
     format_component_value_summary,
 )
+from circuitsim.canvas.export import (
+    ExportOptionsDialog,
+    export_schematic_to_image,
+    export_schematic_to_svg,
+)
 from circuitsim.canvas.scene import CircuitScene
 from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.canvas.view import CircuitView
@@ -160,6 +165,19 @@ class MainWindow(QMainWindow):
         self.act_save_as.setShortcut(QKeySequence.StandardKey.SaveAs)
         self.act_save_as.triggered.connect(self._on_save_circuit_as)
         file_menu.addAction(self.act_save_as)
+
+        file_menu.addSeparator()
+        self.act_export_png = QAction("Export as &PNG...", self)
+        self.act_export_png.setToolTip("Export schematic as a PNG image")
+        self.act_export_png.triggered.connect(self._on_export_png)
+        file_menu.addAction(self.act_export_png)
+
+        self.act_export_svg = QAction("Export as &SVG...", self)
+        self.act_export_svg.setToolTip(
+            "Export schematic as scalable vector graphics (SVG)"
+        )
+        self.act_export_svg.triggered.connect(self._on_export_svg)
+        file_menu.addAction(self.act_export_svg)
 
         file_menu.addSeparator()
         act_exit = QAction("E&xit", self)
@@ -677,6 +695,68 @@ class MainWindow(QMainWindow):
             self.settings.add_recent_file(path)
             self._update_recent_files_menu()
         return saved
+
+    def _on_export_png(self) -> None:
+        if not self.circuit_scene.placed_items and not self.circuit_scene.placed_wires:
+            QMessageBox.information(
+                self, "Export as PNG", "Circuit is empty. Nothing to export."
+            )
+            return
+        dlg = ExportOptionsDialog(self._theme, self)
+        if dlg.exec() != ExportOptionsDialog.DialogCode.Accepted:
+            return
+        theme_mode = dlg.selected_theme_mode()
+
+        default_name = "schematic.png"
+        if self._current_path:
+            default_name = f"{self._current_path.stem}.png"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Schematic as PNG", default_name, "PNG Images (*.png)"
+        )
+        if not path:
+            return
+        try:
+            img = export_schematic_to_image(
+                self.circuit_scene, theme_mode=theme_mode
+            )
+            if img is None or not img.save(path):
+                raise OSError(f"Could not save PNG to {path}")
+            self.statusBar().showMessage(f"Exported PNG: {path}", 3000)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Export Error", f"Failed to export PNG:\n{exc}"
+            )
+
+    def _on_export_svg(self) -> None:
+        if not self.circuit_scene.placed_items and not self.circuit_scene.placed_wires:
+            QMessageBox.information(
+                self, "Export as SVG", "Circuit is empty. Nothing to export."
+            )
+            return
+        dlg = ExportOptionsDialog(self._theme, self)
+        if dlg.exec() != ExportOptionsDialog.DialogCode.Accepted:
+            return
+        theme_mode = dlg.selected_theme_mode()
+
+        default_name = "schematic.svg"
+        if self._current_path:
+            default_name = f"{self._current_path.stem}.svg"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Schematic as SVG", default_name, "SVG Images (*.svg)"
+        )
+        if not path:
+            return
+        try:
+            ok = export_schematic_to_svg(
+                self.circuit_scene, path, theme_mode=theme_mode
+            )
+            if not ok:
+                raise OSError(f"Could not save SVG to {path}")
+            self.statusBar().showMessage(f"Exported SVG: {path}", 3000)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Export Error", f"Failed to export SVG:\n{exc}"
+            )
 
     def _update_recent_files_menu(self) -> None:
         self.recent_menu.clear()
