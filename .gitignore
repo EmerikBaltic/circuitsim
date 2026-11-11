@@ -18,8 +18,13 @@ dist/
 *.exe
 installer_output/
 
+# CircuitSim backup and recovery files
+*.circ.bak
+*.corrupt
+
 # OS / IDE files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+

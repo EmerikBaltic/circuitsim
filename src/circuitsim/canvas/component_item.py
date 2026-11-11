@@ -7,6 +7,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
     QPainter,
     QPainterPath,
     QPen,
@@ -98,6 +99,52 @@ def format_component_value_summary(comp: Component) -> str:
     return ""
 
 
+def rect_intersects_segment(
+    rect: QRectF,
+    p1: tuple[float, float] | QPointF,
+    p2: tuple[float, float] | QPointF,
+) -> bool:
+    """Check if an orthogonal or general line segment intersects or enters a rectangle."""
+    rx1 = rect.left()
+    ry1 = rect.top()
+    rx2 = rect.right()
+    ry2 = rect.bottom()
+
+    x1 = p1.x() if isinstance(p1, QPointF) else p1[0]
+    y1 = p1.y() if isinstance(p1, QPointF) else p1[1]
+    x2 = p2.x() if isinstance(p2, QPointF) else p2[0]
+    y2 = p2.y() if isinstance(p2, QPointF) else p2[1]
+
+    # Either endpoint is inside the rectangle
+    if (rx1 <= x1 <= rx2 and ry1 <= y1 <= ry2) or (rx1 <= x2 <= rx2 and ry1 <= y2 <= ry2):
+        return True
+
+    # Orthogonal horizontal segment
+    if abs(y1 - y2) < 1e-6:
+        seg_y = y1
+        if ry1 <= seg_y <= ry2:
+            seg_min_x = min(x1, x2)
+            seg_max_x = max(x1, x2)
+            if max(seg_min_x, rx1) <= min(seg_max_x, rx2):
+                return True
+        return False
+
+    # Orthogonal vertical segment
+    if abs(x1 - x2) < 1e-6:
+        seg_x = x1
+        if rx1 <= seg_x <= ry2:
+            seg_min_y = min(y1, y2)
+            seg_max_y = max(y1, y2)
+            if max(seg_min_y, ry1) <= min(seg_max_y, ry2):
+                return True
+        return False
+
+    # Bounding box test for general line
+    if max(x1, x2) < rx1 or min(x1, x2) > rx2 or max(y1, y2) < ry1 or min(y1, y2) > ry2:
+        return False
+    return True
+
+
 class ComponentItem(QGraphicsObject):
     """Visual schematic item representing an electrical component on the canvas.
 
@@ -144,6 +191,7 @@ class ComponentItem(QGraphicsObject):
         self.diagnostic_message: str = ""
         self.diagnostic_code: str = ""
         self.is_unconnected: bool = False
+        self.label_position: str = "default"
 
         # Switch lever animation state
         self._lever_angle_deg: float = (
@@ -391,39 +439,121 @@ class ComponentItem(QGraphicsObject):
             float(h_px) + 6.0,
         )
 
+    def set_label_position(self, pos: str) -> None:
+        """Set the label position ('default', 'below', 'above', 'right', 'left')."""
+        if self.label_position != pos:
+            self.prepareGeometryChange()
+            self.label_position = pos
+            self.update()
+
+    def _get_label_and_value_rects_for_position(
+        self, pos: str
+    ) -> tuple[QRectF, QRectF, Qt.AlignmentFlag]:
+        w_px, h_px = self.metadata.pixel_size
+        is_vert = self.rotation_deg in (90, 270)
+        eff_w = float(h_px if is_vert else w_px)
+        eff_h = float(w_px if is_vert else h_px)
+
+        if pos == "default":
+            if is_vert:
+                right_x = float(h_px) / 2.0 + 7.0
+                lbl_rect = QRectF(right_x, -18.0, 96.0, 17.0)
+                val_rect = QRectF(right_x, 1.0, 110.0, 17.0)
+                align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                return lbl_rect, val_rect, align
+
+            if self.component.component_type == "ground":
+                lbl_x = 0.0
+                lbl_y = -float(h_px) / 2.0 - 2.0 if self.rotation_deg == 180 else float(h_px) / 2.0 + 2.0
+                lbl_rect = QRectF(lbl_x - 50.0, lbl_y - 9.0, 100.0, 18.0)
+                val_rect = QRectF(-60.0, 0.0, 120.0, 18.0)
+                return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+
+            lbl_x = self.metadata.label_offset[0] * GRID_PITCH_PX
+            lbl_y = min(
+                self.metadata.label_offset[1] * GRID_PITCH_PX,
+                -float(h_px) / 2.0 - 14.0,
+            )
+            val_x = self.metadata.value_offset[0] * GRID_PITCH_PX
+            val_y = max(
+                self.metadata.value_offset[1] * GRID_PITCH_PX,
+                float(h_px) / 2.0 + 14.0,
+            )
+            lbl_rect = QRectF(lbl_x - 50.0, lbl_y - 9.0, 100.0, 18.0)
+            val_rect = QRectF(val_x - 60.0, val_y - 9.0, 120.0, 18.0)
+            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+
+        if pos == "below":
+            y_top = eff_h / 2.0 + 6.0
+            lbl_rect = QRectF(-50.0, y_top, 100.0, 16.0)
+            val_rect = QRectF(-60.0, y_top + 17.0, 120.0, 16.0)
+            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+
+        if pos == "above":
+            y_base = -eff_h / 2.0 - 6.0
+            lbl_rect = QRectF(-50.0, y_base - 33.0, 100.0, 16.0)
+            val_rect = QRectF(-60.0, y_base - 16.0, 120.0, 16.0)
+            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+
+        if pos == "right":
+            x_start = eff_w / 2.0 + 8.0
+            lbl_rect = QRectF(x_start, -18.0, 96.0, 17.0)
+            val_rect = QRectF(x_start, 1.0, 110.0, 17.0)
+            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+        if pos == "left":
+            x_end = -eff_w / 2.0 - 8.0
+            lbl_rect = QRectF(x_end - 96.0, -18.0, 96.0, 17.0)
+            val_rect = QRectF(x_end - 110.0, 1.0, 110.0, 17.0)
+            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+        return self._get_label_and_value_rects_for_position("default")
+
     def _upright_label_and_value_rects(
         self,
     ) -> tuple[QRectF, QRectF, Qt.AlignmentFlag]:
         """Compute upright (unrotated, unmirrored) label and value rectangles clear of the selection box."""
-        _w_px, h_px = self.metadata.pixel_size
-        if self.rotation_deg in (90, 270):
-            # Symbol is vertical: place label and value upright to the right, clear of selection box
-            right_x = float(h_px) / 2.0 + 7.0
-            lbl_rect = QRectF(right_x, -18.0, 96.0, 17.0)
-            val_rect = QRectF(right_x, 1.0, 110.0, 17.0)
-            align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            return lbl_rect, val_rect, align
+        return self._get_label_and_value_rects_for_position(self.label_position)
 
-        if self.component.component_type == "ground":
-            lbl_x = 0.0
-            lbl_y = -float(h_px) / 2.0 - 2.0 if self.rotation_deg == 180 else float(h_px) / 2.0 + 2.0
-            lbl_rect = QRectF(lbl_x - 50.0, lbl_y - 9.0, 100.0, 18.0)
-            val_rect = QRectF(-60.0, 0.0, 120.0, 18.0)
-            return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+    def candidate_label_rects_scene(
+        self, pos: str | None = None
+    ) -> list[QRectF]:
+        """Compute the tight visual bounding rectangles of this item's labels in scene coordinates."""
+        target_pos = pos if pos is not None else self.label_position
+        lbl_rect, val_rect, text_align = self._get_label_and_value_rects_for_position(target_pos)
 
-        lbl_x = self.metadata.label_offset[0] * GRID_PITCH_PX
-        lbl_y = min(
-            self.metadata.label_offset[1] * GRID_PITCH_PX,
-            -float(h_px) / 2.0 - 14.0,
-        )
-        val_x = self.metadata.value_offset[0] * GRID_PITCH_PX
-        val_y = max(
-            self.metadata.value_offset[1] * GRID_PITCH_PX,
-            float(h_px) / 2.0 + 14.0,
-        )
-        lbl_rect = QRectF(lbl_x - 50.0, lbl_y - 9.0, 100.0, 18.0)
-        val_rect = QRectF(val_x - 60.0, val_y - 9.0, 120.0, 18.0)
-        return lbl_rect, val_rect, Qt.AlignmentFlag.AlignCenter
+        font = QFont("Segoe UI", 8)
+        font.setBold(True)
+        fm = QFontMetrics(font)
+
+        lbl_box = fm.boundingRect(lbl_rect.toRect(), int(text_align), self.component.label)
+        actual_lbl = QRectF(lbl_box).adjusted(-2.0, -1.0, 2.0, 1.0).translated(self.pos())
+        rects = [actual_lbl]
+
+        if self.component.show_value and self.component.component_type != "ground":
+            if isinstance(self.component, (Voltmeter, Ammeter)):
+                font.setBold(True)
+            else:
+                font.setBold(False)
+            fm_val = QFontMetrics(font)
+            val_text = (
+                self.live_display_value
+                if self.live_display_value is not None
+                else format_component_value_summary(self.component)
+            )
+            val_box = fm_val.boundingRect(val_rect.toRect(), int(text_align), val_text)
+            actual_val = QRectF(val_box).adjusted(-3.0, -1.0, 3.0, 1.0).translated(self.pos())
+            rects.append(actual_val)
+
+        return rects
+
+    def scene_body_rect(self) -> QRectF:
+        """Return the rotated/flipped body rectangle in scene coordinates (excluding labels)."""
+        w_px, h_px = self.metadata.pixel_size
+        is_vert = self.rotation_deg in (90, 270)
+        bw = float(h_px if is_vert else w_px)
+        bh = float(w_px if is_vert else h_px)
+        return QRectF(-bw / 2.0, -bh / 2.0, bw, bh).translated(self.pos())
 
     def shape(self) -> QPainterPath:
         """Return precision hit-test shape matching the rotated/flipped symbol body and terminals."""

@@ -1,6 +1,20 @@
 # Project Progress — CircuitSim
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Lettered Items A-G & Numbered Items 1-3 Done (190 Passing Tests)
+## FLASH QUEUE
+- Phase 1 Task 1: Housekeeping (.gitignore, switch breakdown voltage hint, label collision avoidance) - [done]
+- Phase 1 Task 2: Recent Files (File > Open Recent, 8 files, injected path, missing file handling) - [todo]
+- Phase 1 Task 3: Example Circuits (File > Examples, 5 bundled circuits, package data, analytic tests) - [todo]
+- Phase 1 Task 4: Zoom to fit (Ctrl+0) and shortcuts (F5, F6, Shift+F5, info panel, tests) - [todo]
+- Phase 1 Task 5: Hover tooltips with live values (part & terminal hover, immutable frame, tests) - [todo]
+- Phase 1 Task 6: Export schematic (File > Export PNG/SVG, QSvgGenerator, white/dark option, tests) - [todo]
+- Phase 1 Task 7: About dialog, feedback link, crash log exception hook - [todo]
+- Phase 1 Task 8: Bulb burn-out option (dialog UI, dark+cross drawing, amber note, tests) - [todo]
+- Phase 1 Task 9: Number format setting (Preferences: Auto/Dot/Comma, display only, tests) - [todo]
+- Phase 1 Task 10: Continuous integration (.github/workflows/ci.yml, README badge) - [todo]
+- Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
+- Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
+
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Lettered Items A-G & Numbered Items 1-3 Done (233 Passing Tests)
 
 ### What Is Done
 - **Environment, Licensing & Editable Package Installation**:

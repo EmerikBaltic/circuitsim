@@ -27,6 +27,7 @@ from circuitsim.canvas.component_item import (
     COMPONENT_PREFIXES,
     ComponentItem,
     create_default_component_model,
+    rect_intersects_segment,
 )
 from circuitsim.canvas.connectivity import (
     ConnectivityResult,
@@ -270,8 +271,71 @@ class CircuitScene(QGraphicsScene):
             item.set_unconnected(
                 has_connected and item.component.name in unconn_set
             )
+        self.update_label_positions()
         self.circuit_modified.emit()
         self.update()
+
+    def update_label_positions(self) -> None:
+        """Recompute label candidate positions to avoid overlaps deterministically.
+
+        Candidates: 'default', 'below', 'above', 'right', 'left'.
+        A candidate is picked if its visual bounding rectangles do not intersect:
+            1. Any other component body.
+            2. Any already placed label.
+            3. Any wire segment.
+        If no candidate is free, keeps 'default'.
+        """
+        items = sorted(self._placed_items, key=lambda it: it.component.name)
+        if not items:
+            return
+
+        part_bodies = [(it, it.scene_body_rect()) for it in items]
+
+        wire_segments: list[tuple[PointPx, PointPx]] = []
+        for w in self._wire_items:
+            pts = w.points
+            for i in range(len(pts) - 1):
+                wire_segments.append((pts[i], pts[i + 1]))
+
+        placed_labels: list[QRectF] = []
+        for it in items:
+            chosen_pos = "default"
+            for cand in ("default", "below", "above", "right", "left"):
+                rects = it.candidate_label_rects_scene(cand)
+
+                # 1. Must not intersect any other part body
+                collides_body = any(
+                    rect.intersects(body)
+                    for rect in rects
+                    for other_it, body in part_bodies
+                    if other_it is not it
+                )
+                if collides_body:
+                    continue
+
+                # 2. Must not intersect any already placed label
+                collides_label = any(
+                    rect.intersects(lbl)
+                    for rect in rects
+                    for lbl in placed_labels
+                )
+                if collides_label:
+                    continue
+
+                # 3. Must not intersect any wire segment
+                collides_wire = any(
+                    rect_intersects_segment(rect, p1, p2)
+                    for rect in rects
+                    for p1, p2 in wire_segments
+                )
+                if collides_wire:
+                    continue
+
+                chosen_pos = cand
+                break
+
+            it.set_label_position(chosen_pos)
+            placed_labels.extend(it.candidate_label_rects_scene(chosen_pos))
 
     # ------------------------------------------------------------------
     # Palette Ghost Preview & Component Placement

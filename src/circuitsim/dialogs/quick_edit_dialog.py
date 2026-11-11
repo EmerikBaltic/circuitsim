@@ -106,6 +106,18 @@ class QuickValueDialog(QDialog):
             self.preview_labels[spec.key] = preview_lbl
             field_vbox.addWidget(preview_lbl)
 
+            if isinstance(component, Switch) and spec.key == "v_breakdown":
+                arc_hint_lbl = QLabel(
+                    "Contact arc is a simplified model: a switch with more "
+                    "than this voltage across it can arc. Set to 0 for an ideal contact."
+                )
+                arc_hint_lbl.setObjectName("switch_arc_hint_label")
+                arc_hint_lbl.setWordWrap(True)
+                arc_hint_lbl.setStyleSheet(
+                    "color: #8B949E; font-size: 11px; font-style: italic;"
+                )
+                field_vbox.addWidget(arc_hint_lbl)
+
             line_edit.textChanged.connect(
                 lambda _text, s=spec: self._on_field_text_changed(s)
             )
