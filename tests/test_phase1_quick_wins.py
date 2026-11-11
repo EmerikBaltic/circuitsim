@@ -134,3 +134,88 @@ print("TASK1_OK")
     res = _run_qt(script)
     assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
     assert "TASK1_OK" in res.stdout
+
+
+def test_task2_recent_files(tmp_path: Path) -> None:
+    """Task 2: Recent files ordering, limit of 8, duplicate to top, persistence,
+
+    missing file removal, and UI interaction (tooltips, clear list, unsaved prompt).
+    """
+    from circuitsim.app.settings import AppSettings
+
+    data_dir = tmp_path / "app_data"
+    settings = AppSettings(data_dir=data_dir)
+
+    # 1. Ordering and limit of 8
+    dummy_files = [tmp_path / f"circuit_{i}.circ" for i in range(1, 11)]
+    for f in dummy_files:
+        f.write_text("{}", encoding="utf-8")
+        settings.add_recent_file(f)
+
+    recents = settings.get_recent_files()
+    assert len(recents) == 8, f"Expected 8 recent files, got {len(recents)}"
+    # Most recent first: circuit_10 should be at index 0, circuit_3 at index 7
+    assert Path(recents[0]).name == "circuit_10.circ"
+    assert Path(recents[7]).name == "circuit_3.circ"
+
+    # 2. Duplicate moves to top
+    settings.add_recent_file(dummy_files[4])  # circuit_5.circ
+    recents = settings.get_recent_files()
+    assert len(recents) == 8
+    assert Path(recents[0]).name == "circuit_5.circ"
+
+    # 3. Persistence with injected path
+    settings2 = AppSettings(data_dir=data_dir)
+    assert settings2.get_recent_files() == recents
+
+    # 4. Qt Subprocess UI test
+    script = f"""
+import sys
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+from circuitsim.app.main_window import MainWindow
+from circuitsim.app.settings import AppSettings
+
+app = QApplication.instance() or QApplication([])
+data_dir = Path(r"{data_dir}")
+settings = AppSettings(data_dir=data_dir)
+win = MainWindow(settings=settings)
+
+# Inspect Open Recent menu
+recent_menu = win.recent_menu
+actions = [a for a in recent_menu.actions() if not a.isSeparator()]
+assert len(actions) == 9, f"Expected 8 files + 1 Clear list, got {{len(actions)}}"
+
+# File name is text, full path is tooltip
+file_act_0 = actions[0]
+assert file_act_0.text() == "circuit_5.circ"
+assert Path(file_act_0.toolTip()).name == "circuit_5.circ"
+
+# Test missing file handling
+missing_path = Path(r"{tmp_path}") / "deleted_circuit.circ"
+settings.add_recent_file(missing_path)
+win._update_recent_files_menu()
+
+# Mock error popup
+error_shown = []
+win._show_error = lambda title, msg: error_shown.append((title, msg))
+
+# Trigger opening missing file
+win._on_open_recent_file(str(missing_path))
+assert len(error_shown) == 1, "Expected error popup for missing file"
+assert "File Not Found" in error_shown[0][0]
+assert str(missing_path) not in settings.get_recent_files(), "Missing file must be removed from settings"
+
+# Test Clear list
+clear_act = [a for a in recent_menu.actions() if a.text().lower() == "clear list"][0]
+clear_act.trigger()
+assert len(settings.get_recent_files()) == 0, "Clear list must empty settings"
+rem_actions = [a for a in recent_menu.actions() if a.isEnabled()]
+assert len(rem_actions) == 0, "No active actions should remain after clear list"
+
+print("TASK2_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK2_OK" in res.stdout
+

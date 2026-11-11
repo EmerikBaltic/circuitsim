@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from circuitsim.app.palette_dock import ComponentPaletteWidget
+from circuitsim.app.settings import AppSettings
 from circuitsim.app.sim_worker import SimulationWorkerController
 from circuitsim.app.themes import ThemeMode, build_stylesheet, get_theme_palette
 from circuitsim.canvas.component_item import (
@@ -73,11 +74,19 @@ DEFAULT_SHORTCUTS_HELP_TEXT: str = (
 class MainWindow(QMainWindow):
     """Dockable main window for CircuitSim (Section 2 of specification)."""
 
-    def __init__(self, *, initial_theme: ThemeMode = ThemeMode.DARK) -> None:
+    def __init__(
+        self,
+        *,
+        initial_theme: ThemeMode = ThemeMode.DARK,
+        settings: AppSettings | None = None,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("CircuitSim — Electrical Circuit Simulator")
         self.resize(1360, 840)
 
+        self.settings: AppSettings = (
+            settings if settings is not None else AppSettings()
+        )
         self.theme: ThemeMode = initial_theme
         self.symbol_library = SymbolLibrary()
         self.circuit_scene = CircuitScene(self.symbol_library, theme=self.theme)
@@ -129,6 +138,9 @@ class MainWindow(QMainWindow):
         self.act_open.setShortcut(QKeySequence.StandardKey.Open)
         self.act_open.triggered.connect(self._on_open_circuit)
         file_menu.addAction(self.act_open)
+
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self._update_recent_files_menu()
 
         self.act_save = QAction("&Save", self)
         self.act_save.setIconText("Save")
@@ -612,6 +624,8 @@ class MainWindow(QMainWindow):
         self.circuit_view.set_view_state(doc.view.zoom, doc.view.pan)
         self._current_path = p
         self._switch_modified = False
+        self.settings.add_recent_file(p)
+        self._update_recent_files_menu()
         self._update_window_title()
         self.statusBar().showMessage(f"Opened {p.name}", 4000)
         return True
@@ -645,7 +659,55 @@ class MainWindow(QMainWindow):
             return False
         if not path.lower().endswith(".circ"):
             path += ".circ"
-        return self.save_to_path(path)
+        saved = self.save_to_path(path)
+        if saved:
+            self.settings.add_recent_file(path)
+            self._update_recent_files_menu()
+        return saved
+
+    def _update_recent_files_menu(self) -> None:
+        self.recent_menu.clear()
+        recent = self.settings.get_recent_files()
+        if not recent:
+            empty_act = QAction("No Recent Files", self)
+            empty_act.setEnabled(False)
+            self.recent_menu.addAction(empty_act)
+            return
+
+        for path_str in recent:
+            p = Path(path_str)
+            act = QAction(p.name, self)
+            act.setToolTip(path_str)
+            act.setStatusTip(path_str)
+            act.triggered.connect(
+                lambda _checked=False, ps=path_str: self._on_open_recent_file(ps)
+            )
+            self.recent_menu.addAction(act)
+
+        self.recent_menu.addSeparator()
+        clear_act = QAction("Clear list", self)
+        clear_act.triggered.connect(self._on_clear_recent_files)
+        self.recent_menu.addAction(clear_act)
+
+    def _on_clear_recent_files(self) -> None:
+        self.settings.clear_recent_files()
+        self._update_recent_files_menu()
+
+    def _on_open_recent_file(self, path_str: str) -> None:
+        p = Path(path_str)
+        if not p.is_file():
+            self.settings.remove_recent_file(path_str)
+            self._update_recent_files_menu()
+            self._show_error(
+                "File Not Found",
+                f"The file '{p.name}' could not be found:\n{path_str}\n\nIt has been removed from the recent files list.",
+            )
+            return
+
+        if not self._confirm_discard_changes("opening another file"):
+            return
+
+        self.open_path(p)
 
     def _on_speed_combo_changed(self, index: int) -> None:
         raw = self.speed_combo.itemData(index)
