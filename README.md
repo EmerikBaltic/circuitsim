@@ -19,7 +19,7 @@ It is designed for electrical engineering students and hobbyists who want both a
   - Dockable **PySide6 (Qt 6)** Main Window with Dark & Light themes (`Ctrl+T`), searchable Component Palette, and IEC 60617 symbol library (hybrid custom SVG + procedural renderer).
   - Grid-snapped ($20\text{ px}$) schematic canvas with right-angle wire routing, Union-Find netlist extraction (`CircuitScene.build_circuit()`), explicit junction dots (`J`), attached wire re-routing on move/rotate/flip, and full `QUndoStack` Undo/Redo (`Ctrl+Z` / `Ctrl+Y`).
   - Background `QThread` simulation worker (`SimulationWorkerController` + pure-Python `SimulationSession`) with live auto-ranged Voltmeter/Ammeter readouts, animated clickable Switch, real-power Lightbulb glow, double-click live value editing (supporting both dot and single-comma decimals like `5,65 G`), and red/amber canvas problem highlighting.
-  - **233 automated unit and UI tests** passing (`pytest`), including polarity geometry across all 8 orientations, precision hitboxes and click clearance, collision-avoiding wire rerouting, half-grid (10 px) wire snapping, view stability on selection/clicks, unified drawing/netlist polarity marks, and save/load of `.circ` files (Milestone 3, Step 3A).
+  - **244 automated unit and UI tests** passing (`pytest`), including polarity geometry across all 8 orientations, precision hitboxes and click clearance, collision-avoiding wire rerouting, half-grid (10 px) wire snapping, view stability on selection/clicks, unified drawing/netlist polarity marks, and save/load of `.circ` files (Milestone 3, Step 3A).
 - **Milestone 3 (Save/Load `.circ` & Full Properties Dialog — In Progress)**
 
 ---
@@ -41,6 +41,12 @@ Circuits are stored as `.circ` files (plain JSON text that you can open in any e
 
 - **Save**: `Ctrl+S` (or the toolbar **Save** button). The first time you are asked for a name; `Ctrl+Shift+S` (**Save As**) always asks.
 - **Open**: `Ctrl+O`. **New**: `Ctrl+N`.
+- **Open Recent**: `File > Open Recent` preserves the last 8 opened circuits.
+- **Example Circuits**: `File > Examples` loads bundled reference schematics (Voltage Divider, RC Low-Pass Filter, Lightbulb & Switch, Series Sources, Wheatstone Bridge).
+- **Export Schematic**: `File > Export as PNG...` and `File > Export as SVG...` export clean high-resolution schematics with White or Theme canvas backgrounds.
+- **Zoom to Fit**: `View > Zoom to fit` (`Ctrl+0`) frames the whole circuit cleanly.
+- **Preferences**: `Edit > Preferences` configures regional decimal number formatting (Auto, Dot, Comma).
+- **Help & Diagnostics**: `Help > About` displays software and platform versions, while unhandled crashes are logged safely to the user app-data folder.
 - The window title shows the file name and an asterisk (`*`) when there are unsaved changes. CircuitSim asks before New, Open or closing if you would lose changes.
 - Saving is safe: the file is written to a temporary file first and only then swapped in, and the previous version is kept as `yourfile.circ.bak`.
 - A damaged, empty or unknown file (or one made by a newer CircuitSim) shows a friendly message and leaves your current circuit untouched.

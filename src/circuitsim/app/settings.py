@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any
-
-from PySide6.QtCore import QStandardPaths
 
 MAX_RECENT_FILES: int = 8
 SETTINGS_FILENAME: str = "settings.json"
@@ -20,8 +19,31 @@ def get_default_data_dir() -> Path:
         p = Path(override)
         p.mkdir(parents=True, exist_ok=True)
         return p
-    loc = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-    p = Path(loc) if loc else (Path.home() / ".circuitsim")
+    try:
+        from PySide6.QtCore import QStandardPaths
+
+        loc = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppDataLocation
+        )
+        if loc:
+            p = Path(loc)
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+    except Exception:
+        pass
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        p = Path(appdata) / "CircuitSim" if appdata else Path.home() / ".circuitsim"
+    elif sys.platform == "darwin":
+        p = Path.home() / "Library" / "Application Support" / "CircuitSim"
+    else:
+        xdg = os.environ.get("XDG_DATA_HOME")
+        p = (
+            Path(xdg) / "circuitsim"
+            if xdg
+            else Path.home() / ".local" / "share" / "circuitsim"
+        )
     p.mkdir(parents=True, exist_ok=True)
     return p
 
