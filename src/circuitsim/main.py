@@ -94,8 +94,10 @@ def run_demo() -> int:
 def run_gui() -> int:
     """Launch the interactive PySide6 desktop main window."""
     from PySide6.QtWidgets import QApplication
+    from circuitsim.app.crash_handler import install_global_exception_hook
     from circuitsim.app.main_window import MainWindow
 
+    install_global_exception_hook()
     app = QApplication.instance() or QApplication(sys.argv)
     window = MainWindow()
 

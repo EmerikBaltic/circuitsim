@@ -699,4 +699,90 @@ print("TASK6_OK")
     assert "TASK6_OK" in res.stdout
 
 
+def test_task7_about_feedback_and_crash_log() -> None:
+    """Task 7: About dialog, feedback link, and global crash logging.
+
+    Verifications:
+        - Version dynamically retrieved from package metadata (0.1.0).
+        - Repo URL constant and issue tracker URL constants match project specification.
+        - Crash log exception hook formats traceback, Python version, PySide6 version,
+          OS platform, and writes to crash.log in data_dir without raising.
+        - Help menu contains 'Report a problem / suggest a feature' and 'About CircuitSim'.
+    """
+    script = """
+import sys
+import tempfile
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.crash_handler import (
+    ISSUES_URL,
+    REPO_URL,
+    get_app_version,
+    install_global_exception_hook,
+    write_crash_log,
+)
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication.instance() or QApplication([])
+
+# 1. Version and URL constants
+version = get_app_version()
+assert version == "0.1.0", f"Expected version '0.1.0', got '{version}'"
+assert REPO_URL == "https://github.com/EmerikBaltic/circuitsim"
+assert ISSUES_URL == "https://github.com/EmerikBaltic/circuitsim/issues"
+
+# 2. Crash log writing
+with tempfile.TemporaryDirectory() as tmp_dir:
+    log_dir = Path(tmp_dir)
+    try:
+        raise ValueError("Simulated unexpected test error in circuit simulation")
+    except ValueError as exc:
+        log_path = write_crash_log(type(exc), exc, exc.__traceback__, log_dir=log_dir)
+
+    assert log_path.exists(), "crash.log must be written"
+    content = log_path.read_text(encoding="utf-8")
+    assert "CircuitSim Crash Report:" in content
+    assert "Version:        0.1.0" in content
+    assert "Python:" in content
+    assert "PySide6:" in content
+    assert "Platform:" in content
+    assert "Simulated unexpected test error" in content
+    assert "ValueError" in content
+    assert REPO_URL in content
+    assert ISSUES_URL in content
+
+# 3. Global exception hook installation & safety
+with tempfile.TemporaryDirectory() as tmp_dir:
+    log_dir = Path(tmp_dir)
+    install_global_exception_hook(log_dir=log_dir)
+    # Trigger exception hook directly: must write log and must not raise
+    try:
+        raise RuntimeError("Hook verification exception")
+    except RuntimeError as exc:
+        sys.excepthook(type(exc), exc, exc.__traceback__)
+
+    hook_log = log_dir / "crash.log"
+    assert hook_log.exists(), "crash.log must exist after sys.excepthook invocation"
+    hook_content = hook_log.read_text(encoding="utf-8")
+    assert "Hook verification exception" in hook_content
+
+# 4. MainWindow Help menu actions
+win = MainWindow()
+assert win.act_report_issue is not None
+assert "Report a problem" in win.act_report_issue.text()
+assert win.act_about is not None
+assert "About CircuitSim" in win.act_about.text()
+
+scene = win.circuit_scene
+scene.undo_stack.setClean()
+win._switch_modified = False
+print("TASK7_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK7_OK" in res.stdout
+
+
+
 

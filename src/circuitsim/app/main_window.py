@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QPointF, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import QByteArray, QPointF, Qt, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
     QDockWidget,
@@ -23,6 +23,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from circuitsim.app.crash_handler import (
+    ISSUES_URL,
+    REPO_URL,
+    get_app_version,
+)
 from circuitsim.app.palette_dock import ComponentPaletteWidget
 from circuitsim.app.settings import AppSettings
 from circuitsim.app.sim_worker import SimulationWorkerController
@@ -328,6 +333,22 @@ class MainWindow(QMainWindow):
         act_reload_svg = QAction("&Reload Custom SVGs", self)
         act_reload_svg.triggered.connect(self._reload_custom_svgs)
         help_menu.addAction(act_reload_svg)
+
+        help_menu.addSeparator()
+        self.act_report_issue = QAction(
+            "&Report a problem / suggest a feature", self
+        )
+        self.act_report_issue.setToolTip(
+            "Open GitHub issue tracker in your web browser"
+        )
+        self.act_report_issue.triggered.connect(self._on_report_issue)
+        help_menu.addAction(self.act_report_issue)
+
+        help_menu.addSeparator()
+        self.act_about = QAction("&About CircuitSim", self)
+        self.act_about.setToolTip("About CircuitSim")
+        self.act_about.triggered.connect(self._show_about_dialog)
+        help_menu.addAction(self.act_about)
 
         # Compact Top Toolbar (sized so Speed dropdown is always visible without overflow)
         main_tb = QToolBar("Main Toolbar", self)
@@ -757,6 +778,20 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Export Error", f"Failed to export SVG:\n{exc}"
             )
+
+    def _on_report_issue(self) -> None:
+        QDesktopServices.openUrl(QUrl(ISSUES_URL))
+
+    def _show_about_dialog(self) -> None:
+        version = get_app_version()
+        text = (
+            f"<h3>CircuitSim v{version}</h3>"
+            f"<p>Educational desktop electrical circuit simulator built with Python, NumPy/SciPy, and PySide6.</p>"
+            f"<p><b>License:</b> MIT License</p>"
+            f"<p><b>Source Code:</b> <a href='{REPO_URL}'>{REPO_URL}</a></p>"
+            f"<p><b>Report Issues / Feedback:</b> <a href='{ISSUES_URL}'>{ISSUES_URL}</a></p>"
+        )
+        QMessageBox.about(self, "About CircuitSim", text)
 
     def _update_recent_files_menu(self) -> None:
         self.recent_menu.clear()
