@@ -89,6 +89,36 @@ class CircuitView(QGraphicsView):
         self._zoom_factor = 1.0
         self.zoom_changed.emit(self._zoom_factor)
 
+    def zoom_to_fit(self, margin_px: float = 40.0) -> None:
+        """Fit all components and wires into the viewport with a margin; reset to 100% if empty."""
+        items = self.circuit_scene.placed_items
+        if not items:
+            self.reset_zoom()
+            self.centerOn(0.0, 0.0)
+            return
+
+        rect = items[0].sceneBoundingRect()
+        for it in items[1:]:
+            rect = rect.united(it.sceneBoundingRect())
+        for w in self.circuit_scene.placed_wires:
+            rect = rect.united(w.sceneBoundingRect())
+
+        rect = rect.adjusted(-margin_px, -margin_px, margin_px, margin_px)
+        vp_size = self.viewport().size()
+        if vp_size.width() <= 10 or vp_size.height() <= 10:
+            return
+
+        scale_x = vp_size.width() / max(rect.width(), 1.0)
+        scale_y = vp_size.height() / max(rect.height(), 1.0)
+        target_zoom = min(scale_x, scale_y)
+        target_zoom = min(max(target_zoom, self.MIN_ZOOM), self.MAX_ZOOM)
+
+        self.resetTransform()
+        self.scale(target_zoom, target_zoom)
+        self._zoom_factor = target_zoom
+        self.centerOn(rect.center())
+        self.zoom_changed.emit(self._zoom_factor)
+
     def view_center(self) -> tuple[float, float]:
         """Return the scene point shown in the middle of the viewport (saved as 'pan')."""
         c = self.mapToScene(self.viewport().rect().center())

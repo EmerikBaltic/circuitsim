@@ -104,7 +104,7 @@ def compute_transport_controls_state(
             stop_enabled=True,
             stop_label="⏹ &Stop",
             stop_icon_text="⏹ Stop",
-            stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+            stop_tooltip="Stop simulation and reset meters/states (Shortcut: Shift+F5 / F7)",
             status_indicator_text="● Running",
             status_indicator_role="running",
         )
@@ -124,7 +124,7 @@ def compute_transport_controls_state(
             stop_enabled=True,
             stop_label="⏹ &Stop",
             stop_icon_text="⏹ Stop",
-            stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+            stop_tooltip="Stop simulation and reset meters/states (Shortcut: Shift+F5 / F7)",
             status_indicator_text="❚❚ Paused",
             status_indicator_role="paused",
         )
@@ -149,7 +149,7 @@ def compute_transport_controls_state(
             stop_enabled=False,
             stop_label="⏹ &Stop",
             stop_icon_text="⏹ Stop",
-            stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+            stop_tooltip="Stop simulation and reset meters/states (Shortcut: Shift+F5 / F7)",
             status_indicator_text="■ Stopped",
             status_indicator_role="error",
         )
@@ -169,7 +169,7 @@ def compute_transport_controls_state(
         stop_enabled=False,
         stop_label="⏹ &Stop",
         stop_icon_text="⏹ Stop",
-        stop_tooltip="Stop simulation and reset meters/states (Shortcut: F7)",
+        stop_tooltip="Stop simulation and reset meters/states (Shortcut: Shift+F5 / F7)",
         status_indicator_text="■ Stopped",
         status_indicator_role="stopped",
     )

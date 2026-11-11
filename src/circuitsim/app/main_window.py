@@ -64,8 +64,10 @@ DEFAULT_SHORTCUTS_HELP_TEXT: str = (
     "• Delete selection: Del or Backspace\n"
     "• Cut / Copy / Paste: Ctrl+X / Ctrl+C / Ctrl+V\n"
     "• Undo / Redo: Ctrl+Z / Ctrl+Y\n"
-    "• Run / Pause / Stop: F5 / F6 / F7\n"
-    "• Box select: Left-drag on empty canvas\n"
+    "• Run / Resume: F5\n"
+    "• Pause: F6\n"
+    "• Stop: Shift+F5\n"
+    "• Zoom to fit: Ctrl+0\n"
     "• Zoom: Mouse wheel (Ctrl++ / Ctrl+-)\n"
     "• Pan canvas: Middle-drag or Space + Left-drag\n"
     "• Toggle Dark/Light theme: Ctrl+T"
@@ -175,9 +177,10 @@ class MainWindow(QMainWindow):
         self.act_redo = self.circuit_scene.undo_stack.createRedoAction(
             self, "&Redo"
         )
-        self.act_redo.setShortcuts(
-            [QKeySequence.StandardKey.Redo, QKeySequence("Ctrl+Y")]
-        )
+        redo_shortcuts = [QKeySequence.StandardKey.Redo]
+        if QKeySequence("Ctrl+Y") not in redo_shortcuts:
+            redo_shortcuts.append(QKeySequence("Ctrl+Y"))
+        self.act_redo.setShortcuts(redo_shortcuts)
         self.act_redo.setToolTip("Redo last undone action (Shortcut: Ctrl+Y)")
         edit_menu.addAction(self.act_undo)
         edit_menu.addAction(self.act_redo)
@@ -275,11 +278,17 @@ class MainWindow(QMainWindow):
         act_zoom_reset.triggered.connect(self.circuit_view.reset_zoom)
         self.view_menu.addAction(act_zoom_reset)
 
+        self.act_zoom_fit = QAction("Zoom to &Fit", self)
+        self.act_zoom_fit.setShortcut(QKeySequence("Ctrl+0"))
+        self.act_zoom_fit.setToolTip("Fit all components to window (Shortcut: Ctrl+0)")
+        self.act_zoom_fit.triggered.connect(self.circuit_view.zoom_to_fit)
+        self.view_menu.addAction(self.act_zoom_fit)
+
         # Simulation menu
         sim_menu = menu_bar.addMenu("&Simulation")
-        self.act_run = QAction("▶ &Run", self)
+        self.act_run = QAction("▶ &Run / Resume", self)
         self.act_run.setShortcut(QKeySequence("F5"))
-        self.act_run.setToolTip("Start circuit simulation (Shortcut: F5)")
+        self.act_run.setToolTip("Start or resume simulation (Shortcut: F5)")
         self.act_run.triggered.connect(self.start_simulation)
 
         self.act_pause = QAction("⏸ &Pause", self)
@@ -288,8 +297,8 @@ class MainWindow(QMainWindow):
         self.act_pause.triggered.connect(self.pause_simulation)
 
         self.act_stop = QAction("⏹ &Stop", self)
-        self.act_stop.setShortcut(QKeySequence("F7"))
-        self.act_stop.setToolTip("Stop simulation and reset meters/states (Shortcut: F7)")
+        self.act_stop.setShortcut(QKeySequence("Shift+F5"))
+        self.act_stop.setToolTip("Stop simulation and reset meters/states (Shortcut: Shift+F5 / F7)")
         self.act_stop.triggered.connect(self.stop_simulation)
 
         sim_menu.addAction(self.act_run)

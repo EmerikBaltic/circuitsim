@@ -331,3 +331,90 @@ print("TASK3_OK")
     assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
     assert "TASK3_OK" in res.stdout
 
+
+def test_task4_zoom_to_fit_and_shortcuts() -> None:
+    """Task 4: Zoom to fit (Ctrl+0), shortcuts (F5, F6, Shift+F5), no duplicate shortcuts,
+
+    zoom to fit does not change sceneRect or move parts, and shortcuts shown in info panel.
+    """
+    script = """
+import sys
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QApplication
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication.instance() or QApplication([])
+win = MainWindow()
+win.resize(1024, 768)
+win.show()
+app.processEvents()
+
+# 1. No two actions share a shortcut
+all_actions = win.findChildren(QAction)
+shortcut_map = {}
+for act in all_actions:
+    sc_list = act.shortcuts()
+    single_sc = act.shortcut()
+    combined = list(sc_list)
+    if not single_sc.isEmpty() and single_sc not in combined:
+        combined.append(single_sc)
+    unique_keys = set(sc.toString() for sc in combined if sc.toString())
+    for key_str in unique_keys:
+        if key_str in shortcut_map:
+            other_act = shortcut_map[key_str]
+            assert other_act is act, (
+                f"Duplicate shortcut '{key_str}' shared by '{other_act.text()}' and '{act.text()}'"
+            )
+        shortcut_map[key_str] = act
+
+# 2. Check specific shortcuts and tooltips
+assert win.act_run.shortcut().toString() == "F5"
+assert "F5" in win.act_run.toolTip()
+assert win.act_pause.shortcut().toString() == "F6"
+assert "F6" in win.act_pause.toolTip()
+assert win.act_stop.shortcut().toString() == "Shift+F5"
+assert "Shift+F5" in win.act_stop.toolTip()
+assert win.act_zoom_fit.shortcut().toString() == "Ctrl+0"
+assert "Ctrl+0" in win.act_zoom_fit.toolTip()
+
+# 3. Check shortcuts help text in info panel
+info_text = win.info_label.text()
+assert "F5" in info_text
+assert "F6" in info_text
+assert "Shift+F5" in info_text
+assert "Ctrl+0" in info_text
+
+# 4. Zoom to fit on empty circuit resets to 100%
+view = win.circuit_view
+scene = win.circuit_scene
+view.scale(2.0, 2.0)
+view.zoom_to_fit()
+assert abs(view.zoom_factor - 1.0) < 1e-4, f"Empty circuit zoom must reset to 1.0, got {view.zoom_factor}"
+
+# 5. Zoom to fit on circuit with parts
+r1 = scene.place_new_component("resistor", QPointF(-200.0, -150.0))
+r2 = scene.place_new_component("resistor", QPointF(200.0, 150.0))
+app.processEvents()
+
+scene_rect_before = scene.sceneRect()
+pos_r1_before = (r1.pos().x(), r1.pos().y())
+pos_r2_before = (r2.pos().x(), r2.pos().y())
+
+view.zoom_to_fit()
+app.processEvents()
+
+# Assert sceneRect and part positions are strictly unchanged
+assert scene.sceneRect() == scene_rect_before, "zoom_to_fit must NOT modify sceneRect"
+assert (r1.pos().x(), r1.pos().y()) == pos_r1_before, "zoom_to_fit must NOT move part R1"
+assert (r2.pos().x(), r2.pos().y()) == pos_r2_before, "zoom_to_fit must NOT move part R2"
+
+# View transform must be adapted to fit parts with margin
+assert view.zoom_factor != 1.0 or view.view_center() != (0.0, 0.0), "zoom_to_fit must change view viewport/zoom"
+
+print("TASK4_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
+    assert "TASK4_OK" in res.stdout
+
