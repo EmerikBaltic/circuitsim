@@ -59,6 +59,12 @@ _EXTRA_SETTINGS: dict[str, dict[str, str]] = {
     },
     "ac_voltage": {"waveform": "str", "phase_deg": "float", "duty_cycle": "float"},
     "lightbulb": {"use_filament_model": "bool", "burnout_enabled": "bool"},
+    "led": {
+        "color_name": "str",
+        "color": "str",
+        "burnout_enabled": "bool",
+        "burnout_current": "float_or_none",
+    },
     "voltmeter": {"mode": "str"},
     "ammeter": {"mode": "str"},
 }

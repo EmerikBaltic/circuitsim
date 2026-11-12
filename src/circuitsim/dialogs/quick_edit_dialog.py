@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from typing import Callable
+import math
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from circuitsim.components.base import Component, ComponentParameter
+from circuitsim.components.led import LED, LED_COLOUR_PRESETS
 from circuitsim.components.lightbulb import Lightbulb
 from circuitsim.components.switch import Switch
 from circuitsim.dialogs.value_parser import (
@@ -79,8 +83,29 @@ class QuickValueDialog(QDialog):
         )
         root_layout.addWidget(self.live_edit_note_label)
 
+        self._updating_color: bool = False
+        self._updating_vf: bool = False
+        self.led_color_combo: QComboBox | None = None
+        self.led_datasheet_lbl: QLabel | None = None
+        self.led_datasheet_hint_lbl: QLabel | None = None
+        self.led_burnout_cb: QCheckBox | None = None
+        self.led_burnout_current_edit: QLineEdit | None = None
+
         form = QFormLayout()
         form.setSpacing(8)
+
+        if isinstance(component, LED):
+            self.led_color_combo = QComboBox(self)
+            self.led_color_combo.setObjectName("led_color_combo")
+            for cname, cinfo in LED_COLOUR_PRESETS.items():
+                pix = QPixmap(16, 16)
+                pix.fill(QColor(str(cinfo["hex"])))
+                self.led_color_combo.addItem(QIcon(pix), cname)
+
+            self.led_color_combo.setCurrentText(component.color_name)
+            self.led_color_combo.currentTextChanged.connect(self._on_led_color_changed)
+            form.addRow("Colour:", self.led_color_combo)
+
         for spec in self._param_specs:
             field_container = QWidget(self)
             field_vbox = QVBoxLayout(field_container)
@@ -118,6 +143,32 @@ class QuickValueDialog(QDialog):
                     "color: #8B949E; font-size: 11px; font-style: italic;"
                 )
                 field_vbox.addWidget(arc_hint_lbl)
+
+            if isinstance(component, LED) and spec.key == "forward_voltage":
+                cname = component.color_name
+                preset = LED_COLOUR_PRESETS.get(cname, LED_COLOUR_PRESETS["Red"])
+                vf_val = preset["forward_voltage"]
+                vf_text = (
+                    f"Forward voltage at 20 mA: {vf_val:.1f} V "
+                    f"(datasheet range {preset['datasheet_range']})"
+                    if cname != "Custom"
+                    else "Forward voltage: user defined (Custom)"
+                )
+                self.led_datasheet_lbl = QLabel(vf_text, self)
+                self.led_datasheet_lbl.setObjectName("led_datasheet_lbl")
+                self.led_datasheet_lbl.setWordWrap(True)
+                self.led_datasheet_lbl.setStyleSheet("color: #58A6FF; font-size: 11px;")
+                field_vbox.addWidget(self.led_datasheet_lbl)
+
+                self.led_datasheet_hint_lbl = QLabel(
+                    "typical datasheet values; real LEDs vary by about +-0.3 V", self
+                )
+                self.led_datasheet_hint_lbl.setObjectName("led_datasheet_hint_lbl")
+                self.led_datasheet_hint_lbl.setWordWrap(True)
+                self.led_datasheet_hint_lbl.setStyleSheet(
+                    "color: #8B949E; font-size: 11px; font-style: italic;"
+                )
+                field_vbox.addWidget(self.led_datasheet_hint_lbl)
 
             line_edit.textChanged.connect(
                 lambda _text, s=spec: self._on_field_text_changed(s)
@@ -163,6 +214,17 @@ class QuickValueDialog(QDialog):
             self.burnout_time_edit.setObjectName("burnout_time_edit")
             form.addRow("Burn-out Duration:", self.burnout_time_edit)
 
+        if isinstance(component, LED):
+            self.led_burnout_cb = QCheckBox("Enable burn-out on overload")
+            self.led_burnout_cb.setObjectName("led_burnout_cb")
+            self.led_burnout_cb.setChecked(component.burnout_enabled)
+            form.addRow("Burn-out:", self.led_burnout_cb)
+
+            burnout_thresh = format_engineering_value(component.burnout_current, "A")
+            self.led_burnout_current_edit = QLineEdit(burnout_thresh)
+            self.led_burnout_current_edit.setObjectName("led_burnout_current_edit")
+            form.addRow("Burn-out Current Threshold:", self.led_burnout_current_edit)
+
         self.show_value_cb = QCheckBox("Show value on schematic canvas")
         self.show_value_cb.setChecked(component.show_value)
         form.addRow("Display:", self.show_value_cb)
@@ -197,9 +259,47 @@ class QuickValueDialog(QDialog):
             self.error_label.clear()
             self.error_label.setVisible(False)
 
+    def _on_led_color_changed(self, color_name: str) -> None:
+        if self._updating_color or not isinstance(self.component, LED):
+            return
+        if color_name in LED_COLOUR_PRESETS and color_name != "Custom":
+            preset = LED_COLOUR_PRESETS[color_name]
+            self._updating_vf = True
+            vf_val = float(preset["forward_voltage"])
+            if "forward_voltage" in self.inputs:
+                self.inputs["forward_voltage"].setText(str(vf_val))
+            if self.led_datasheet_lbl is not None:
+                self.led_datasheet_lbl.setText(
+                    f"Forward voltage at 20 mA: {vf_val:.1f} V "
+                    f"(datasheet range {preset['datasheet_range']})"
+                )
+            self._updating_vf = False
+        elif color_name == "Custom" and self.led_datasheet_lbl is not None:
+            self.led_datasheet_lbl.setText("Forward voltage: user defined (Custom)")
+
     def _on_field_text_changed(self, spec: ComponentParameter) -> None:
         self._clear_error()
         self._update_field_preview(spec)
+
+        if (
+            isinstance(self.component, LED)
+            and spec.key == "forward_voltage"
+            and not self._updating_vf
+            and self.led_color_combo is not None
+        ):
+            try:
+                typed_val = parse_engineering_value(self.inputs[spec.key].text().strip())
+                curr_color = self.led_color_combo.currentText()
+                if curr_color in LED_COLOUR_PRESETS and curr_color != "Custom":
+                    expected_vf = float(LED_COLOUR_PRESETS[curr_color]["forward_voltage"])
+                    if not math.isclose(typed_val, expected_vf, abs_tol=1e-3):
+                        self._updating_color = True
+                        self.led_color_combo.setCurrentText("Custom")
+                        if self.led_datasheet_lbl is not None:
+                            self.led_datasheet_lbl.setText("Forward voltage: user defined (Custom)")
+                        self._updating_color = False
+            except ValueError:
+                pass
 
     def _update_field_preview(self, spec: ComponentParameter) -> None:
         lbl = self.preview_labels.get(spec.key)
@@ -266,6 +366,23 @@ class QuickValueDialog(QDialog):
                 except ValueError as exc:
                     return None, f"Invalid burn-out duration: {exc}"
 
+        if isinstance(self.component, LED):
+            if self.led_burnout_cb is not None:
+                parsed_map["burnout_enabled"] = self.led_burnout_cb.isChecked()
+            if self.led_burnout_current_edit is not None:
+                try:
+                    i_b = parse_engineering_value(self.led_burnout_current_edit.text().strip())
+                    if i_b <= 0.0:
+                        return None, "Burn-out threshold must be greater than 0 A."
+                    parsed_map["burnout_current"] = i_b
+                except ValueError as exc:
+                    return None, f"Invalid burn-out threshold: {exc}"
+            if self.led_color_combo is not None:
+                cname = self.led_color_combo.currentText()
+                parsed_map["color_name"] = cname
+                if cname in LED_COLOUR_PRESETS:
+                    parsed_map["color"] = str(LED_COLOUR_PRESETS[cname]["hex"])
+
         return parsed_map, None
 
     def _apply_current_inputs(self) -> bool:
@@ -282,8 +399,12 @@ class QuickValueDialog(QDialog):
         if self._on_apply is not None:
             self._on_apply(parsed_map, show_val)
         else:
+            param_keys = {p.key for p in self.component.get_editable_parameters()}
             for k, v in parsed_map.items():
-                self.component.set_parameter_value(k, v)
+                if k in param_keys:
+                    self.component.set_parameter_value(k, v)
+                elif hasattr(self.component, k):
+                    setattr(self.component, k, v)
             self.component.show_value = show_val
 
         if (

@@ -986,19 +986,23 @@ class CircuitScene(QGraphicsScene):
     def edit_component_parameters(
         self,
         item: ComponentItem,
-        new_params: dict[str, float | str],
+        new_params: dict[str, object],
         *,
         show_value: bool | None = None,
     ) -> bool:
         """Apply parameter changes to `item` via `QUndoStack` (`EditComponentParametersCommand`)."""
         comp = item.component
-        old_params: dict[str, float] = {}
-        parsed_new: dict[str, float] = {}
+        old_params: dict[str, object] = {}
+        parsed_new: dict[str, object] = {}
+        param_keys = {p.key for p in comp.get_editable_parameters()}
         for k, raw_val in new_params.items():
-            old_params[k] = comp.get_parameter_value(k)
-            parsed_new[k] = comp.set_parameter_value(k, raw_val)
-            # Restore old value before pushing undo command so redo() performs the transition cleanly
-            comp.set_parameter_value(k, old_params[k])
+            if k in param_keys:
+                old_params[k] = comp.get_parameter_value(k)
+                parsed_new[k] = comp.set_parameter_value(k, raw_val)  # type: ignore[arg-type]
+                comp.set_parameter_value(k, old_params[k])  # type: ignore[arg-type]
+            elif hasattr(comp, k):
+                old_params[k] = getattr(comp, k)
+                parsed_new[k] = raw_val
 
         old_show = comp.show_value
         new_show = old_show if show_value is None else bool(show_value)
@@ -1009,8 +1013,8 @@ class CircuitScene(QGraphicsScene):
             EditComponentParametersCommand(
                 self,
                 item,
-                old_params,
-                parsed_new,
+                old_params,  # type: ignore[arg-type]
+                parsed_new,  # type: ignore[arg-type]
                 old_show_value=old_show,
                 new_show_value=new_show,
             )

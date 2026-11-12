@@ -293,14 +293,23 @@ class EditComponentParametersCommand(QUndoCommand):
             else bool(new_show_value)
         )
 
-    def _apply(self, params: dict[str, float], show_val: bool) -> None:
+    def _apply(self, params: dict[str, object], show_val: bool) -> None:
         comp = self.item.component
+        param_keys = {p.key for p in comp.get_editable_parameters()}
         for k, v in params.items():
-            comp.set_parameter_value(k, v)
+            if k in param_keys:
+                comp.set_parameter_value(k, v)
+            elif hasattr(comp, k):
+                setattr(comp, k, v)
         comp.show_value = show_val
         self.item.live_display_value = None
         self.item.update()
-        self.scene.component_parameters_edited.emit(comp.name, dict(params))
+        numeric_params = {
+            k: float(v)
+            for k, v in params.items()
+            if isinstance(v, (int, float))
+        }
+        self.scene.component_parameters_edited.emit(comp.name, numeric_params)
         self.scene.selection_info_changed.emit(
             self.item if self.item.isSelected() else None
         )
