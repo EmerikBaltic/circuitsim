@@ -209,3 +209,95 @@ print("PROBLEMS_PANEL_OK")
     res = _run_qt_script(script)
     assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     assert "PROBLEMS_PANEL_OK" in res.stdout
+
+
+def test_problems_panel_close_button_visual_and_accessible_in_both_themes() -> None:
+    """Item 2: Verify close button text/icon, min size 24x24, tooltip, accessible name,
+
+    visibility in dark and light themes, zero canvas shift on click, and severity icons.
+    """
+    script = """
+import os
+import sys
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor, QImage
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.app.problems_panel import ProblemsPanel, make_severity_icon
+from circuitsim.app.themes import ThemeMode
+
+app = QApplication.instance() or QApplication([])
+win = MainWindow()
+win.resize(1000, 700)
+win.show()
+
+panel = win.problems_dock.panel
+btn = panel.close_btn
+
+# 1. Properties
+assert btn.minimumWidth() >= 24, f"Expected min width >= 24, got {btn.minimumWidth()}"
+assert btn.minimumHeight() >= 24, f"Expected min height >= 24, got {btn.minimumHeight()}"
+assert btn.toolTip() == "Close (F8)", f"Expected tooltip 'Close (F8)', got '{btn.toolTip()}'"
+assert btn.accessibleName() == "Close (F8)", f"Expected accessibleName 'Close (F8)', got '{btn.accessibleName()}'"
+assert (bool(btn.text().strip()) or not btn.icon().isNull()), "Button must have non-empty text or non-null icon"
+assert "✕" in btn.text(), f"Expected '✕' in button text, got '{btn.text()}'"
+
+# 2. Render in both Dark and Light themes and assert button pixels differ from background
+for theme in [ThemeMode.DARK, ThemeMode.LIGHT]:
+    win.apply_theme(theme)
+    win.problems_dock.show()
+    app.processEvents()
+
+    # Render close button area
+    btn_size = btn.size()
+    img = QImage(btn_size, QImage.Format.Format_ARGB32)
+    # Background color of the header
+    bg_col = QColor("#161B22" if theme == ThemeMode.DARK else "#FFFFFF")
+    img.fill(bg_col)
+    btn.render(img)
+
+    differing_pixels = sum(
+        1 for y in range(img.height()) for x in range(img.width()) if img.pixelColor(x, y) != bg_col
+    )
+    assert differing_pixels > 0, f"Close button pixels did not differ from background in {theme.value} theme!"
+
+# 3. Canvas shift invariance on button click
+scene = win.circuit_scene
+view = win.circuit_view
+scene.place_new_component("resistor", QPointF(200.0, 200.0))
+
+h_val = view.horizontalScrollBar().value()
+v_val = view.verticalScrollBar().value()
+s_rect = (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height())
+
+# Click close button
+assert win.problems_dock.isVisible()
+btn.click()
+app.processEvents()
+assert win.problems_dock.isHidden(), "ProblemsDock should be hidden after clicking close button"
+assert view.horizontalScrollBar().value() == h_val, "Canvas horizontal scroll shifted on close!"
+assert view.verticalScrollBar().value() == v_val, "Canvas vertical scroll shifted on close!"
+assert (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height()) == s_rect
+
+# 4. Severity icons verification (error, warning, info)
+for sev in ["error", "warning", "info"]:
+    icon = make_severity_icon(sev)
+    assert not icon.isNull(), f"Severity icon for '{sev}' is null"
+    pm = icon.pixmap(16, 16)
+    assert not pm.isNull()
+    img_sev = pm.toImage()
+    # Check that center contains drawn pixels (not empty box)
+    colored_pixels = sum(
+        1 for y in range(16) for x in range(16) if img_sev.pixelColor(x, y).alpha() > 0
+    )
+    assert colored_pixels >= 20, f"Severity icon for '{sev}' has too few pixels ({colored_pixels})"
+
+win._is_closing = True
+win.close()
+print("CLOSE_BTN_AND_ICONS_OK")
+"""
+    res = _run_qt_script(script)
+    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "CLOSE_BTN_AND_ICONS_OK" in res.stdout

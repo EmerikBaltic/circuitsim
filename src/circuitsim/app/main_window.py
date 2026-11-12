@@ -1113,6 +1113,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(build_stylesheet(palette))
         self.circuit_scene.set_theme(theme)
         self.palette_widget.set_theme(theme)
+        if hasattr(self, "problems_dock"):
+            self.problems_dock.panel.set_theme(theme)
 
         if theme == ThemeMode.DARK:
             self.act_toggle_theme.setText("Light &Theme")
