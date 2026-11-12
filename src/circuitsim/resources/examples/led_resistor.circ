@@ -1,0 +1,132 @@
+{
+  "format": "circuitsim",
+  "schema_version": 1,
+  "components": [
+    {
+      "type": "dc_voltage",
+      "name": "V1",
+      "label": "V1",
+      "show_value": true,
+      "center_px": [
+        -100.0,
+        0.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "dc_voltage": 5.0,
+        "r_internal": 0.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "resistor",
+      "name": "R1",
+      "label": "R1",
+      "show_value": true,
+      "center_px": [
+        0.0,
+        -40.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {
+        "resistance": 150.0
+      },
+      "settings": {}
+    },
+    {
+      "type": "led",
+      "name": "D1",
+      "label": "D1",
+      "show_value": true,
+      "center_px": [
+        100.0,
+        0.0
+      ],
+      "rotation_deg": 90,
+      "flipped_h": false,
+      "parameters": {
+        "forward_voltage": 2.0,
+        "rated_current": 0.02,
+        "max_current": 0.03
+      },
+      "settings": {
+        "color_name": "Red",
+        "color": "#FF3B30",
+        "burnout_enabled": false,
+        "burnout_current": 0.045
+      }
+    },
+    {
+      "type": "ground",
+      "name": "GND1",
+      "label": "GND1",
+      "show_value": true,
+      "center_px": [
+        -100.0,
+        60.0
+      ],
+      "rotation_deg": 0,
+      "flipped_h": false,
+      "parameters": {},
+      "settings": {}
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1",
+      "points": [
+        [
+          -100.0,
+          -40.0
+        ],
+        [
+          -40.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W2",
+      "points": [
+        [
+          40.0,
+          -40.0
+        ],
+        [
+          100.0,
+          -40.0
+        ]
+      ]
+    },
+    {
+      "id": "W3",
+      "points": [
+        [
+          100.0,
+          40.0
+        ],
+        [
+          -100.0,
+          40.0
+        ]
+      ]
+    }
+  ],
+  "junctions": [
+    [
+      -100,
+      40
+    ]
+  ],
+  "view": {
+    "theme": "dark",
+    "zoom": 1.0,
+    "pan": [
+      0.0,
+      0.0
+    ],
+    "simulation_speed": "1x"
+  }
+}

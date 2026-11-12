@@ -909,6 +909,21 @@ class MainWindow(QMainWindow):
             )
             self.examples_menu.addAction(act)
 
+        # LED examples
+        led_examples = [
+            ("LED with a resistor", "5 V, 150 Ω, red LED, 20 mA", "led_resistor.circ"),
+            ("LED colours", "5 V with 3 different colour LEDs (Red, Green, Blue) at 20 mA", "led_colours.circ"),
+        ]
+        self.examples_menu.addSeparator()
+        for title, desc, fname in led_examples:
+            act = QAction(title, self)
+            act.setToolTip(desc)
+            act.setStatusTip(desc)
+            act.triggered.connect(
+                lambda _checked=False, p=ex_dir / fname, t=title: self._on_open_example(p, t)
+            )
+            self.examples_menu.addAction(act)
+
     def _on_open_example(self, path: Path, title: str) -> None:
         if not self._confirm_discard_changes("opening an example circuit"):
             return
