@@ -29,6 +29,7 @@ from circuitsim.app.crash_handler import (
     get_app_version,
 )
 from circuitsim.app.palette_dock import ComponentPaletteWidget
+from circuitsim.app.problems_panel import ProblemsDock
 from circuitsim.app.settings import AppSettings
 from circuitsim.app.sim_worker import SimulationWorkerController
 from circuitsim.app.themes import ThemeMode, build_stylesheet, get_theme_palette
@@ -117,6 +118,8 @@ class MainWindow(QMainWindow):
         self._current_path: Path | None = None
         self._switch_modified: bool = False
         self._is_closing: bool = False
+        self._user_closed_problems_panel: bool = False
+        self._prev_error_count: int = 0
 
         self._build_menus_and_toolbars()
         self._build_docks()
@@ -444,11 +447,27 @@ class MainWindow(QMainWindow):
         self.info_dock.setWidget(self.info_scroll)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.info_dock)
 
+        # 3. Bottom Dock: Problems Panel
+        self.problems_dock = ProblemsDock(self)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.problems_dock)
+        self.resizeDocks([self.problems_dock], [120], Qt.Orientation.Vertical)
+        self.problems_dock.hide()
+
+        self.problems_dock.user_closed.connect(self._on_problems_panel_closed)
+        self.problems_dock.visibilityChanged.connect(self._on_problems_visibility_changed)
+        self.problems_dock.panel.problem_activated.connect(self._on_problem_part_selected)
+
         # Add dock panel visibility actions to View menu
         if hasattr(self, "view_menu"):
             self.view_menu.addSeparator()
             self.view_menu.addAction(self.palette_dock.toggleViewAction())
             self.view_menu.addAction(self.info_dock.toggleViewAction())
+            self.action_view_problems = QAction("&Problems", self)
+            self.action_view_problems.setShortcut("F8")
+            self.action_view_problems.setCheckable(True)
+            self.action_view_problems.setChecked(False)
+            self.action_view_problems.triggered.connect(self._toggle_problems_panel)
+            self.view_menu.addAction(self.action_view_problems)
 
     def _build_status_bar(self) -> None:
         sb = self.statusBar()
@@ -505,6 +524,8 @@ class MainWindow(QMainWindow):
     def start_simulation(self) -> None:
         """Send current schematic to the worker thread and start simulation."""
         if self._sim_state != SimulationState.PAUSED:
+            self._user_closed_problems_panel = False
+            self._prev_error_count = 0
             self._sync_schematic_to_worker()
         self.sim_controller.start()
 
@@ -587,6 +608,8 @@ class MainWindow(QMainWindow):
 
     def stop_simulation(self) -> None:
         """Stop simulation and reset meters/states back to t = 0."""
+        self._user_closed_problems_panel = False
+        self._prev_error_count = 0
         self.sim_controller.stop()
         self.circuit_scene.clear_diagnostics()
         for item in self.circuit_scene.placed_items:
@@ -956,24 +979,67 @@ class MainWindow(QMainWindow):
             self.status_sim.setText("Sim: Stopped (t = 0 s)")
 
         if frame.diagnostics:
-            # Show most severe diagnostic in status bar
-            top_diag = errors[0] if errors else frame.diagnostics[0]
-            if top_diag.severity == "error":
+            n_prob = len(frame.diagnostics)
+            prob_str = "1 problem" if n_prob == 1 else f"{n_prob} problems"
+            if errors:
                 self.status_warnings.setStyleSheet(
                     "color: #FF6B6B; font-weight: 600;"
                 )
-                self.status_warnings.setText(f"Error: {top_diag.message}")
             else:
                 self.status_warnings.setStyleSheet(
                     "color: #FFA726; font-weight: 600;"
                 )
-                self.status_warnings.setText(f"Warning: {top_diag.message}")
+            self.status_warnings.setText(prob_str)
         else:
             self.status_warnings.setStyleSheet("")
             if frame.state == SimulationState.RUNNING:
-                self.status_warnings.setText("Simulation Running (OK)")
+                self.status_warnings.setText("0 problems")
             else:
                 self._refresh_warnings_display()
+
+        # Update Problems Panel diagnostics
+        if hasattr(self, "problems_dock"):
+            self.problems_dock.panel.update_diagnostics(frame.diagnostics)
+
+        # Auto-open Problems panel on new error unless closed during current run
+        curr_error_count = len(errors)
+        if curr_error_count > self._prev_error_count:
+            if not self._user_closed_problems_panel and hasattr(self, "problems_dock"):
+                self.problems_dock.show()
+                if hasattr(self, "action_view_problems"):
+                    self.action_view_problems.setChecked(True)
+        self._prev_error_count = curr_error_count
+
+    def _toggle_problems_panel(self, checked: bool | None = None) -> None:
+        if checked is None:
+            new_visible = not self.problems_dock.isVisible()
+        else:
+            new_visible = bool(checked)
+        if not new_visible and self._sim_state == SimulationState.RUNNING:
+            self._user_closed_problems_panel = True
+        self.problems_dock.setVisible(new_visible)
+        if hasattr(self, "action_view_problems"):
+            self.action_view_problems.setChecked(new_visible)
+
+    def _on_problems_panel_closed(self) -> None:
+        if self._sim_state == SimulationState.RUNNING:
+            self._user_closed_problems_panel = True
+        if hasattr(self, "action_view_problems"):
+            self.action_view_problems.setChecked(False)
+
+    def _on_problems_visibility_changed(self, visible: bool) -> None:
+        if not visible and self._sim_state == SimulationState.RUNNING:
+            self._user_closed_problems_panel = True
+        if hasattr(self, "action_view_problems"):
+            self.action_view_problems.setChecked(visible)
+
+    def _on_problem_part_selected(self, part_name: str) -> None:
+        for item in self.circuit_scene.items():
+            if isinstance(item, ComponentItem) and item.component.name == part_name:
+                self.circuit_scene.clearSelection()
+                item.setSelected(True)
+                self.circuit_view.centerOn(item)
+                break
 
     # ------------------------------------------------------------------
     # Theme & UI Updates

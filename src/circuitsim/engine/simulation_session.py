@@ -397,8 +397,8 @@ class SimulationSession:
                 code="no_ground",
                 severity="error",
                 message=(
-                    str(exc)
-                    or "No ground connected — Add a Ground part and wire it to the circuit"
+                    "No ground connected: circuit requires a reference potential (0 V) to solve node equations; "
+                    "Add a Ground part and wire it to the circuit"
                 ),
                 component_names=tuple(all_comps_list),
                 wire_ids=all_wires,
@@ -408,29 +408,42 @@ class SimulationSession:
             return ProblemDiagnostic(
                 code="floating_node",
                 severity="error",
-                message=str(exc),
+                message=(
+                    f"Node '{exc.node}' is floating: node has no DC path to ground; "
+                    "connect all terminals to a complete circuit branch tied to ground"
+                ),
                 component_names=c_names,
                 wire_ids=w_ids,
                 nodes=(exc.node,),
             )
         if isinstance(exc, VoltageSourceLoopError):
+            src_str = ", ".join(exc.sources) if exc.sources else "sources"
             return ProblemDiagnostic(
                 code="voltage_source_loop",
                 severity="error",
-                message=str(exc),
+                message=(
+                    f"Voltage source loop ({src_str}): ideal voltage sources form a closed loop violating Kirchhoff's Voltage Law; "
+                    "remove the parallel source or add internal series resistance"
+                ),
                 component_names=tuple(exc.sources),
             )
         if isinstance(exc, SingularMatrixError):
             return ProblemDiagnostic(
                 code="singular_matrix",
                 severity="error",
-                message=str(exc),
+                message=(
+                    "Singular MNA matrix: equations cannot be solved due to isolated or conflicting branches; "
+                    "verify all node connections and add a ground reference"
+                ),
                 component_names=tuple(c.name for c in self.circuit.components),
             )
         return ProblemDiagnostic(
             code="circuit_error",
             severity="error",
-            message=str(exc),
+            message=(
+                f"Circuit error ({exc}): numerical solver could not converge; "
+                "verify component parameters and connection topology"
+            ),
         )
 
     def _collect_warnings_diagnostics(
@@ -470,7 +483,10 @@ class SimulationSession:
                         ProblemDiagnostic(
                             code="bulb_burned_out",
                             severity="warning",
-                            message=f"{comp.name} burned out",
+                            message=(
+                                f"Lightbulb {comp.name} burned out: power dissipation exceeded rated {comp.rated_power:g} W; "
+                                "replace bulb and reduce supply voltage or add series resistance"
+                            ),
                             component_names=(comp.name,),
                         )
                     )
@@ -480,8 +496,9 @@ class SimulationSession:
                             code="over_bright",
                             severity="warning",
                             message=(
-                                f"Lightbulb {comp.name} overloaded "
-                                f"({comp.brightness_percent:.0f}% of rated {comp.rated_power:g} W)"
+                                f"Lightbulb {comp.name} overloaded: power dissipation is {comp.power:.2f} W "
+                                f"({comp.brightness_percent:.0f}% of rated {comp.rated_power:g} W); "
+                                "excessive heating will cause burnout; increase series resistance"
                             ),
                             component_names=(comp.name,),
                         )
@@ -558,7 +575,10 @@ class SimulationSession:
                     ProblemDiagnostic(
                         code="unconnected_component",
                         severity="warning",
-                        message=f"{cname} is not connected and is ignored",
+                        message=(
+                            f"Component {cname} is not connected: terminals have no attached wires and part is ignored; "
+                            "connect wires to terminals or delete the component"
+                        ),
                         component_names=(cname,),
                     )
                 )
