@@ -233,3 +233,82 @@ assert len(captured) == 0, f"Expected 0 exceptions, caught {len(captured)}"
     assert proc.returncode == 0, f"Subprocess failed with code {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
 
 
+def test_crash_handler_deduplication_and_no_dialog_loop() -> None:
+    """Item 4: Raising the same exception 1000 times inside paint produces exactly one dialog call and one log entry with count."""
+    script = """
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QImage, QPainter
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.crash_handler import (
+    create_crash_dialog,
+    get_dialog_call_count,
+    install_global_exception_hook,
+    reset_crash_state,
+    set_dialog_handler,
+)
+from circuitsim.app.main_window import MainWindow
+
+tmp_dir = Path(tempfile.mkdtemp())
+try:
+    app = QApplication.instance() or QApplication([])
+    reset_crash_state()
+    install_global_exception_hook(log_dir=tmp_dir)
+
+    dialog_calls = []
+    set_dialog_handler(lambda msg, count, path: dialog_calls.append((msg, count, path)))
+
+    win = MainWindow()
+    win.show()
+    scene = win.circuit_scene
+    item = scene.place_new_component("resistor", QPointF(200.0, 200.0))
+
+    # Simulate raising the same exception 1000 times during paint
+    for i in range(1000):
+        try:
+            raise AttributeError("Test paint error: missing attribute token")
+        except Exception as e:
+            sys.excepthook(type(e), e, e.__traceback__)
+
+    # Process event loop so QTimer.singleShot(0, ...) fires
+    app.processEvents()
+
+    # 1. Exactly one dialog call made
+    assert len(dialog_calls) == 1, f"Expected 1 dialog call, got {len(dialog_calls)}"
+    msg, count, log_path = dialog_calls[0]
+    assert count == 1000, f"Expected count 1000, got {count}"
+    assert get_dialog_call_count() == 1
+
+    # 2. Exactly one log entry written to crash.log with count
+    log_file = tmp_dir / "crash.log"
+    assert log_file.exists(), "crash.log must exist"
+    log_text = log_file.read_text(encoding="utf-8")
+    report_blocks = log_text.count("=" * 70) // 2
+    assert report_blocks == 1, f"Expected exactly 1 log block, got {report_blocks}"
+    assert "Occurrences:    1000" in log_text
+
+    # 3. Verify dialog has Quit button and repeat count in text
+    box = create_crash_dialog("Test error", count=1000, log_path=log_file)
+    btn_texts = [b.text() for b in box.buttons()]
+    assert any("Quit" in b for b in btn_texts), f"Quit button missing from {btn_texts}"
+    assert any("OK" in b for b in btn_texts), f"OK button missing from {btn_texts}"
+    assert "This error occurred 1000 times." in box.text()
+
+    scene.clear_schematic()
+    win.close()
+    reset_crash_state()
+finally:
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+"""
+    proc = _run_qt_script(script, timeout=20)
+    assert proc.returncode == 0, f"Subprocess failed with code {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
+
+
+
