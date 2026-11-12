@@ -236,6 +236,12 @@ class ComponentItem(QGraphicsObject):
             if self.component.brightness > 0.05:
                 return "lit"
             return "normal"
+        if isinstance(self.component, LED):
+            if self.component.burned_out:
+                return "burned_out"
+            if getattr(self.component, "brightness", 0.0) > 0.0:
+                return "lit"
+            return "normal"
         return None
 
     @property
@@ -262,6 +268,34 @@ class ComponentItem(QGraphicsObject):
 
     def get_live_tooltip(self, is_running: bool = False) -> str:
         """Return formatted live tooltip text for this component."""
+        if isinstance(self.component, LED):
+            led = self.component
+            lines: list[str] = []
+            if self.diagnostic_message:
+                lines.append(f"Problem: {self.diagnostic_message}")
+            lines.append(f"Name: {led.name}")
+            lines.append(f"Colour: {led.color_name}")
+            if is_running:
+                lines.append(f"Voltage: {format_engineering_value(abs(led.voltage), 'V')}")
+                lines.append(f"Current: {format_engineering_value(abs(led.current), 'A')}")
+            else:
+                lines.append("Voltage: --")
+                lines.append("Current: --")
+            if led.burned_out:
+                st = "Burned out"
+            elif not is_running:
+                st = "Off"
+            elif getattr(led, "is_over_current", False):
+                st = "Over-current"
+            elif getattr(led, "brightness", 0.0) > 0.0 or abs(led.current) >= 1e-5:
+                st = "On"
+            elif led.voltage < -0.1:
+                st = "Reverse-biased"
+            else:
+                st = "Off"
+            lines.append(f"State: {st}")
+            return "\n".join(lines)
+
         lines: list[str] = []
         if self.diagnostic_message:
             lines.append(f"Problem: {self.diagnostic_message}")
@@ -328,6 +362,10 @@ class ComponentItem(QGraphicsObject):
 
         if isinstance(self.component, Lightbulb):
             self.component.burned_out = telemetry.burned_out
+        elif isinstance(self.component, LED):
+            self.component.burned_out = telemetry.burned_out
+            self.component.brightness = telemetry.brightness
+            self.component.is_over_current = telemetry.is_over_current
         elif isinstance(self.component, Switch):
             if self.component.closed != telemetry.switch_closed:
                 self.animate_switch_state(telemetry.switch_closed)
@@ -719,6 +757,38 @@ class ComponentItem(QGraphicsObject):
         painter.drawEllipse(QPointF(0.0, 0.0), radius, radius)
         painter.restore()
 
+    def _paint_led_glow(self, painter: QPainter) -> None:
+        if not isinstance(self.component, LED) or self.is_ghost:
+            return
+        led = self.component
+        if led.burned_out or led.brightness <= 0.0 or abs(led.current) < 1e-5:
+            return
+
+        vis = min(2.0, float(led.brightness))
+        radius = 16.0 + 16.0 * min(1.0, vis)
+        grad = QRadialGradient(QPointF(0.0, 0.0), radius)
+
+        base_color = QColor(led.color)
+        r, g, b = base_color.red(), base_color.green(), base_color.blue()
+
+        if led.is_over_current:
+            grad.setColorAt(0.0, QColor(255, 255, 255, 230))
+            grad.setColorAt(0.35, QColor(r, g, b, 230))
+            grad.setColorAt(0.7, QColor(r, g, b, 160))
+            grad.setColorAt(1.0, QColor(r, g, b, 0))
+        else:
+            alpha_core = int(min(220, 50 + 150 * min(1.0, vis)))
+            alpha_mid = int(min(140, 25 + 90 * min(1.0, vis)))
+            grad.setColorAt(0.0, QColor(r, g, b, alpha_core))
+            grad.setColorAt(0.55, QColor(r, g, b, alpha_mid))
+            grad.setColorAt(1.0, QColor(r, g, b, 0))
+
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(grad))
+        painter.drawEllipse(QPointF(0.0, 0.0), radius, radius)
+        painter.restore()
+
     def paint(
         self,
         painter: QPainter,
@@ -730,8 +800,9 @@ class ComponentItem(QGraphicsObject):
         w_px, h_px = self.metadata.pixel_size
         body_rect = QRectF(-w_px / 2.0, -h_px / 2.0, float(w_px), float(h_px))
 
-        # 1. Lightbulb real-power glow (centered at 0, 0)
+        # 1. Lightbulb & LED glow (centered at 0, 0)
         self._paint_lightbulb_glow(painter)
+        self._paint_led_glow(painter)
 
         # 2. Rotated/flipped symbol and selection/problem frame
         painter.save()
@@ -766,6 +837,8 @@ class ComponentItem(QGraphicsObject):
         stroke_col = palette.ghost_tint if self.is_ghost else palette.symbol_stroke
         if self.diagnostic_severity == "error" and not self.is_ghost:
             stroke_col = "#FF6B6B"
+        elif self.diagnostic_severity == "warning" and not self.is_ghost:
+            stroke_col = "#FFA726"
 
         lever_arg = (
             self._lever_angle_deg
@@ -818,12 +891,16 @@ class ComponentItem(QGraphicsObject):
                 painter.fillRect(QRectF(val_box).adjusted(-3.0, -1.0, 3.0, 1.0), QColor(palette.canvas_bg))
                 painter.drawText(val_rect, text_align, val_text)
 
-            # Over-bright or problem badge in upright coordinates
+            # Over-bright, over-current, or problem badge in upright coordinates
             is_over_bulb = (
                 isinstance(self.component, Lightbulb)
                 and self.component.is_over_bright
             )
-            if self.diagnostic_severity in ("error", "warning") or is_over_bulb:
+            is_over_led = (
+                isinstance(self.component, LED)
+                and getattr(self.component, "is_over_current", False)
+            )
+            if self.diagnostic_severity in ("error", "warning") or is_over_bulb or is_over_led:
                 badge_col = (
                     QColor("#FF5252")
                     if self.diagnostic_severity == "error"

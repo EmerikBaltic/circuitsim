@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         WireSpec,
     )
 from circuitsim.components.base import Component
+from circuitsim.components.led import LED
 from circuitsim.components.lightbulb import Lightbulb
 from circuitsim.components.meters import Ammeter, Voltmeter
 from circuitsim.components.resistor import Resistor
@@ -206,6 +207,8 @@ class ComponentTelemetry:
     burned_out: bool = False
     switch_closed: bool = False
     switch_arcing: bool = False
+    is_over_current: bool = False
+    led_color: str = ""
 
 
 @dataclass(frozen=True)
@@ -484,6 +487,70 @@ class SimulationSession:
                         )
                     )
 
+        # Check LED diagnostics (burned out, over current, reversed, no series resistor)
+        for comp in self.circuit.components:
+            if isinstance(comp, LED):
+                if comp.burned_out:
+                    diags.append(
+                        ProblemDiagnostic(
+                            code="led_burned_out",
+                            severity="error",
+                            message=(
+                                f"LED {comp.name} burned out: current exceeded burnout threshold "
+                                f"({format_engineering_value(comp.burnout_current, 'A')}); "
+                                "replace part and add a current-limiting resistor"
+                            ),
+                            component_names=(comp.name,),
+                        )
+                    )
+                elif comp.is_over_current:
+                    diags.append(
+                        ProblemDiagnostic(
+                            code="led_over_current",
+                            severity="warning",
+                            message=(
+                                f"LED {comp.name} current {format_engineering_value(abs(comp.current), 'A')} "
+                                f"exceeds maximum rating {format_engineering_value(comp.max_current, 'A')}; "
+                                "increase series resistor to prevent damage"
+                            ),
+                            component_names=(comp.name,),
+                        )
+                    )
+
+                if comp.voltage < -0.1:
+                    diags.append(
+                        ProblemDiagnostic(
+                            code="led_reversed",
+                            severity="warning",
+                            message=(
+                                f"LED {comp.name} is reversed (reverse-biased at {format_engineering_value(abs(comp.voltage), 'V')}); "
+                                "LEDs only conduct forward from anode to cathode; rotate or flip part"
+                            ),
+                            component_names=(comp.name,),
+                        )
+                    )
+
+                if not comp.burned_out:
+                    has_direct_vs = False
+                    for src in self.circuit.components:
+                        if isinstance(src, (DCVoltageSource, ACVoltageSource)):
+                            if set(comp.nodes) == set(src.nodes) and src.r_internal < 1.0:
+                                has_direct_vs = True
+                                break
+                    if has_direct_vs or (comp.is_conducting and abs(comp.current) > 0.05 and comp.is_over_current):
+                        diags.append(
+                            ProblemDiagnostic(
+                                code="led_no_resistor",
+                                severity="warning",
+                                message=(
+                                    f"LED {comp.name} has no current-limiting resistor in series; "
+                                    "direct voltage source connection causes destructive over-current; "
+                                    "insert a series resistor"
+                                ),
+                                component_names=(comp.name,),
+                            )
+                        )
+
         # Report any completely unconnected schematic components (ignored by solver)
         if self._connectivity is not None:
             for cname in self._connectivity.unconnected_components:
@@ -636,13 +703,17 @@ class SimulationSession:
         """Construct an immutable `SimulationFrame` from current component states."""
         comp_map: dict[str, ComponentTelemetry] = {}
         for comp in self.circuit.components:
-            brightness = comp.brightness if isinstance(comp, Lightbulb) else 0.0
+            brightness = comp.brightness if isinstance(comp, (Lightbulb, LED)) else 0.0
             over_bright = (
                 comp.is_over_bright if isinstance(comp, Lightbulb) else False
             )
             burned_out = (
-                comp.burned_out if isinstance(comp, Lightbulb) else False
+                comp.burned_out if isinstance(comp, (Lightbulb, LED)) else False
             )
+            is_over_cur = (
+                comp.is_over_current if isinstance(comp, LED) else False
+            )
+            led_col = comp.color if isinstance(comp, LED) else ""
             sw_closed = comp.closed if isinstance(comp, Switch) else False
             sw_arcing = comp.arcing if isinstance(comp, Switch) else False
 
@@ -658,6 +729,8 @@ class SimulationSession:
                 burned_out=burned_out,
                 switch_closed=sw_closed,
                 switch_arcing=sw_arcing,
+                is_over_current=is_over_cur,
+                led_color=led_col,
             )
 
         return SimulationFrame(

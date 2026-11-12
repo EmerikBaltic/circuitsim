@@ -11,6 +11,7 @@ from scipy.linalg import lu_factor, lu_solve
 from circuitsim.components.capacitor import Capacitor
 from circuitsim.components.ground import Ground
 from circuitsim.components.inductor import Inductor
+from circuitsim.components.led import LED
 from circuitsim.components.lightbulb import Lightbulb
 from circuitsim.components.meters import Ammeter, Voltmeter
 from circuitsim.components.resistor import Resistor
@@ -239,7 +240,7 @@ class MNASolver:
     def _dc_conductance_signature(self) -> tuple[float, ...]:
         sig: list[float] = [self.gmin]
         for comp in self.circuit.components:
-            if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter)):
+            if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter, LED)):
                 sig.append(comp.conductance)
             elif isinstance(comp, Inductor):
                 sig.append(comp.dc_conductance)
@@ -255,6 +256,9 @@ class MNASolver:
         for comp in self.circuit.components:
             if isinstance(comp, (Resistor, Lightbulb, Voltmeter, Ammeter)):
                 sig.append(comp.conductance)
+            elif isinstance(comp, LED):
+                g_led, _ = comp.companion_model(dt, method_str)
+                sig.append(g_led)
             elif isinstance(comp, Switch):
                 g_sw, _ = comp.companion_model(dt, method_str)
                 sig.append(g_sw)
@@ -301,6 +305,9 @@ class MNASolver:
                 self._stamp_conductance(
                     matrix_a, comp.nodes[0], comp.nodes[1], comp.conductance
                 )
+            elif isinstance(comp, LED):
+                g_led, _ = comp.companion_model(dt if mode != "dc" else 0.0, method_str if mode != "dc" else "dc")
+                self._stamp_conductance(matrix_a, comp.nodes[0], comp.nodes[1], g_led)
             elif isinstance(comp, Switch):
                 if mode == "dc":
                     g_sw = comp.conductance
@@ -382,6 +389,14 @@ class MNASolver:
             elif isinstance(comp, ACVoltageSource):
                 row_k = self._vs_to_idx[comp.name]
                 rhs_b[row_k] = comp.voltage_at(0.0)
+            elif isinstance(comp, LED):
+                _, i_eq = comp.companion_model(0.0, "dc")
+                idx_a = self._node_to_idx.get(comp.nodes[0])
+                idx_k = self._node_to_idx.get(comp.nodes[1])
+                if idx_a is not None:
+                    rhs_b[idx_a] += i_eq
+                if idx_k is not None:
+                    rhs_b[idx_k] -= i_eq
 
         return rhs_b
 
@@ -403,6 +418,14 @@ class MNASolver:
             elif isinstance(comp, (DCVoltageSource, ACVoltageSource)):
                 row_k = self._vs_to_idx[comp.name]
                 rhs_b[row_k] = comp.voltage_at(sim_time)
+            elif isinstance(comp, LED):
+                _, i_eq = comp.companion_model(dt, method_str)
+                idx_a = self._node_to_idx.get(comp.nodes[0])
+                idx_k = self._node_to_idx.get(comp.nodes[1])
+                if idx_a is not None:
+                    rhs_b[idx_a] += i_eq
+                if idx_k is not None:
+                    rhs_b[idx_k] -= i_eq
             elif isinstance(comp, Switch) and (comp.c_parasitic > 0.0 or comp.arcing):
                 _, i_sw_eq = comp.companion_model(dt, method_str)
                 idx_a = self._node_to_idx.get(comp.nodes[0])
@@ -444,34 +467,55 @@ class MNASolver:
         warnings = self.circuit.validate_topology()
         self._topology_warnings = list(warnings)
 
-        current_sig = self._dc_conductance_signature()
-        needs_rebuild = (
-            self._lu_piv is None
-            or self._cached_mode != "dc"
-            or self._cached_circuit_version != self.circuit.version
-            or self._cached_conductance_signature != current_sig
-        )
+        has_leds = any(isinstance(c, LED) for c in self.circuit.components)
+        max_diode_iters = 10 if has_leds else 1
 
-        if needs_rebuild:
-            self._assemble_and_factorize(mode="dc")
+        for _d_iter in range(max_diode_iters):
+            current_sig = self._dc_conductance_signature()
+            needs_rebuild = (
+                self._lu_piv is None
+                or self._cached_mode != "dc"
+                or self._cached_circuit_version != self.circuit.version
+                or self._cached_conductance_signature != current_sig
+            )
 
-        assert self._lu_piv is not None
-        assert self._matrix_a is not None
+            if needs_rebuild:
+                self._assemble_and_factorize(mode="dc")
 
-        dim = self._matrix_a.shape[0]
-        if dim > 0:
-            rhs_b = self._build_rhs_dc()
-            solution_x = lu_solve(self._lu_piv, rhs_b, check_finite=True)
-            if not np.all(np.isfinite(solution_x)):
-                raise SingularMatrixError("MNA solve produced non-finite values.")
-        else:
-            solution_x = np.zeros(0, dtype=np.float64)
+            assert self._lu_piv is not None
+            assert self._matrix_a is not None
 
-        node_voltages: dict[str, float] = {}
-        for gnd_node in self.circuit.grounded_nodes():
-            node_voltages[gnd_node] = 0.0
-        for node, idx in self._node_to_idx.items():
-            node_voltages[node] = float(solution_x[idx])
+            dim = self._matrix_a.shape[0]
+            if dim > 0:
+                rhs_b = self._build_rhs_dc()
+                solution_x = lu_solve(self._lu_piv, rhs_b, check_finite=True)
+                if not np.all(np.isfinite(solution_x)):
+                    raise SingularMatrixError("MNA solve produced non-finite values.")
+            else:
+                solution_x = np.zeros(0, dtype=np.float64)
+
+            node_voltages: dict[str, float] = {}
+            for gnd_node in self.circuit.grounded_nodes():
+                node_voltages[gnd_node] = 0.0
+            for node, idx in self._node_to_idx.items():
+                node_voltages[node] = float(solution_x[idx])
+
+            state_changed = False
+            for comp in self.circuit.components:
+                if isinstance(comp, LED) and not comp.burned_out:
+                    v_ak = node_voltages.get(comp.nodes[0], 0.0) - node_voltages.get(comp.nodes[1], 0.0)
+                    if comp.is_conducting:
+                        i_ak = (v_ak - comp.forward_voltage) / comp.r_on
+                        if i_ak < -1e-9 or v_ak < comp.forward_voltage - 1e-4:
+                            comp.is_conducting = False
+                            state_changed = True
+                    else:
+                        if v_ak > comp.forward_voltage + 1e-4:
+                            comp.is_conducting = True
+                            state_changed = True
+
+            if not state_changed:
+                break
 
         branch_currents: dict[str, float] = {}
         for comp in self.circuit.components:
@@ -495,6 +539,28 @@ class MNASolver:
                     comp.record_sample(0.0, comp.voltage, 0.0)
                 elif isinstance(comp, Ammeter):
                     comp.record_sample(0.0, comp.current, 0.0)
+            elif isinstance(comp, LED):
+                if comp.burned_out:
+                    i_ab = v_ab / comp.r_off
+                    comp.is_conducting = False
+                    comp.brightness = 0.0
+                    comp.is_over_current = False
+                elif comp.is_conducting:
+                    i_ab = (v_ab - comp.forward_voltage) / comp.r_on
+                else:
+                    i_ab = v_ab / comp.r_off
+                comp.current = i_ab
+                comp.power = v_ab * i_ab
+                if comp.burned_out or i_ab < 1e-5:
+                    comp.brightness = 0.0
+                else:
+                    comp.brightness = math.sqrt(max(0.0, i_ab) / comp.rated_current)
+                comp.is_over_current = (i_ab > comp.max_current and not comp.burned_out)
+                if comp.burnout_enabled and i_ab >= comp.burnout_current:
+                    comp.burned_out = True
+                    comp.is_conducting = False
+                    comp.brightness = 0.0
+                    comp.is_over_current = False
             elif isinstance(comp, Capacitor):
                 comp.current = 0.0
                 comp.power = 0.0
@@ -784,6 +850,34 @@ class MNASolver:
                 for node, idx in self._node_to_idx.items():
                     node_voltages[node] = float(solution_x[idx])
 
+        # 3c. Check for LED conduction state transitions
+        for _diode_iter in range(5):
+            led_state_changed = False
+            for comp in self.circuit.components:
+                if isinstance(comp, LED) and not comp.burned_out:
+                    v_ak = node_voltages.get(comp.nodes[0], 0.0) - node_voltages.get(comp.nodes[1], 0.0)
+                    if comp.is_conducting:
+                        i_ak = (v_ak - comp.forward_voltage) / comp.r_on
+                        if i_ak < -1e-9 or v_ak < comp.forward_voltage - 1e-4:
+                            comp.is_conducting = False
+                            led_state_changed = True
+                    else:
+                        if v_ak > comp.forward_voltage + 1e-4:
+                            comp.is_conducting = True
+                            led_state_changed = True
+            if not led_state_changed:
+                break
+            self._assemble_and_factorize(
+                mode="transient", dt=dt, method_str=method_str
+            )
+            needs_rebuild = True
+            assert self._lu_piv is not None
+            if dim > 0:
+                rhs_b = self._build_rhs_transient(t_next, dt, method_str)
+                solution_x = lu_solve(self._lu_piv, rhs_b, check_finite=True)
+                for node, idx in self._node_to_idx.items():
+                    node_voltages[node] = float(solution_x[idx])
+
         # 4. Update component voltages, currents, companion states, and meter buffers.
         step_warnings: list[CircuitWarning] = list(self._topology_warnings)
         branch_currents: dict[str, float] = {}
@@ -825,6 +919,29 @@ class MNASolver:
                     comp.record_sample(t_next, comp.voltage, dt)
                 elif isinstance(comp, Ammeter):
                     comp.record_sample(t_next, comp.current, dt)
+            elif isinstance(comp, LED):
+                comp.voltage = v_ab
+                if comp.burned_out:
+                    i_ab = v_ab / comp.r_off
+                    comp.is_conducting = False
+                    comp.brightness = 0.0
+                    comp.is_over_current = False
+                elif comp.is_conducting:
+                    i_ab = (v_ab - comp.forward_voltage) / comp.r_on
+                else:
+                    i_ab = v_ab / comp.r_off
+                comp.current = i_ab
+                comp.power = v_ab * i_ab
+                if comp.burned_out or i_ab < 1e-5:
+                    comp.brightness = 0.0
+                else:
+                    comp.brightness = math.sqrt(max(0.0, i_ab) / comp.rated_current)
+                comp.is_over_current = (i_ab > comp.max_current and not comp.burned_out)
+                if comp.burnout_enabled and i_ab >= comp.burnout_current:
+                    comp.burned_out = True
+                    comp.is_conducting = False
+                    comp.brightness = 0.0
+                    comp.is_over_current = False
             elif isinstance(comp, Switch):
                 comp.update_companion_state(v_ab, dt, method_str)
                 i_ab = comp.current

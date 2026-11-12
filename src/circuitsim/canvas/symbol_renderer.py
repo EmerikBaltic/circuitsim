@@ -5,7 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 import math
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtSvg import QSvgRenderer
 
 from circuitsim.app.themes import ThemeMode, get_theme_palette
@@ -134,7 +144,7 @@ class SymbolLibrary:
             flat_color=polarity_color if component_id == "led" else None,
         )
         used_svg = False
-        if svg_renderer is not None and lever_angle_deg is None:
+        if svg_renderer is not None and lever_angle_deg is None and state != "burned_out":
             svg_renderer.render(painter, target_rect)
             used_svg = True
         else:
@@ -346,6 +356,18 @@ class SymbolLibrary:
         elif component_id == "led":
             # IEC LED symbol with cathode flat
             painter.drawLine(QPointF(-40.0, 0.0), QPointF(-14.0, 0.0))
+
+            if state == "burned_out":
+                painter.save()
+                dark_brush = QBrush(QColor(45, 45, 45))
+                painter.setBrush(dark_brush)
+                case_fill = QPainterPath()
+                case_fill.moveTo(10.0, 10.4)
+                case_fill.arcTo(QRectF(-21.0, -17.0, 34.0, 34.0), 320.0, 260.0)
+                case_fill.closeSubpath()
+                painter.drawPath(case_fill)
+                painter.restore()
+
             poly = QPolygonF([QPointF(-14.0, -9.0), QPointF(-14.0, 9.0), QPointF(4.0, 0.0)])
             painter.drawPolygon(poly)
             painter.drawLine(QPointF(4.0, -11.0), QPointF(4.0, 11.0))
@@ -362,12 +384,18 @@ class SymbolLibrary:
             painter.drawLine(QPointF(10.0, -10.4), QPointF(10.0, 10.4))
             painter.restore()
 
-            painter.drawLine(QPointF(1.0, -9.0), QPointF(10.0, -16.0))
-            painter.drawLine(QPointF(5.0, -16.0), QPointF(10.0, -16.0))
-            painter.drawLine(QPointF(10.0, -11.0), QPointF(10.0, -16.0))
-            painter.drawLine(QPointF(7.0, -7.0), QPointF(16.0, -14.0))
-            painter.drawLine(QPointF(11.0, -14.0), QPointF(16.0, -14.0))
-            painter.drawLine(QPointF(16.0, -9.0), QPointF(16.0, -14.0))
+            if state == "burned_out":
+                # Dark body with cross across the LED body
+                d = 10.0
+                painter.drawLine(QPointF(-d, -d), QPointF(d, d))
+                painter.drawLine(QPointF(-d, d), QPointF(d, -d))
+            else:
+                painter.drawLine(QPointF(1.0, -9.0), QPointF(10.0, -16.0))
+                painter.drawLine(QPointF(5.0, -16.0), QPointF(10.0, -16.0))
+                painter.drawLine(QPointF(10.0, -11.0), QPointF(10.0, -16.0))
+                painter.drawLine(QPointF(7.0, -7.0), QPointF(16.0, -14.0))
+                painter.drawLine(QPointF(11.0, -14.0), QPointF(16.0, -14.0))
+                painter.drawLine(QPointF(16.0, -9.0), QPointF(16.0, -14.0))
 
         elif component_id in ("voltmeter", "ammeter"):
             # Circle (r = 15) and leads

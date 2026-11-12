@@ -9,6 +9,7 @@ from circuitsim.components.base import Component
 from circuitsim.components.capacitor import Capacitor
 from circuitsim.components.ground import Ground
 from circuitsim.components.inductor import Inductor
+from circuitsim.components.led import LED
 from circuitsim.components.lightbulb import Lightbulb
 from circuitsim.components.meters import Ammeter, Voltmeter
 from circuitsim.components.resistor import Resistor
@@ -180,7 +181,7 @@ class Circuit:
                 ):
                     continue
                 g = 0.0
-                if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter)):
+                if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter, LED)):
                     g = comp.conductance
                 elif isinstance(comp, Inductor) and comp.dcr > 0.0:
                     g = 1.0 / comp.dcr
