@@ -21,6 +21,7 @@ from circuitsim.components.sources import (
     DCVoltageSource,
 )
 from circuitsim.components.switch import Switch
+from circuitsim.dialogs.value_parser import format_engineering_value
 from circuitsim.engine.errors import CircuitWarning, SingularMatrixError
 from circuitsim.engine.netlist import Circuit
 
@@ -230,18 +231,22 @@ class MNASolver:
             matrix_a[idx_a, idx_b] -= g
             matrix_a[idx_b, idx_a] -= g
 
-    def _voltage_sources(self) -> list[DCVoltageSource | ACVoltageSource]:
+    def _voltage_sources(self) -> list[DCVoltageSource | ACVoltageSource | Ammeter]:
         return [
             comp
             for comp in self.circuit.components
             if isinstance(comp, (DCVoltageSource, ACVoltageSource))
+            or (isinstance(comp, Ammeter) and comp.is_ideal)
         ]
 
     def _dc_conductance_signature(self) -> tuple[float, ...]:
         sig: list[float] = [self.gmin]
         for comp in self.circuit.components:
             if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter, LED)):
-                sig.append(comp.conductance)
+                if isinstance(comp, (Voltmeter, Ammeter)) and comp.is_ideal:
+                    sig.append(0.0)
+                else:
+                    sig.append(comp.conductance)
             elif isinstance(comp, Inductor):
                 sig.append(comp.dc_conductance)
             elif isinstance(comp, (DCVoltageSource, ACVoltageSource)):
@@ -255,7 +260,10 @@ class MNASolver:
         sig: list[float] = [self.gmin, dt, method_code]
         for comp in self.circuit.components:
             if isinstance(comp, (Resistor, Lightbulb, Voltmeter, Ammeter)):
-                sig.append(comp.conductance)
+                if isinstance(comp, (Voltmeter, Ammeter)) and comp.is_ideal:
+                    sig.append(0.0)
+                else:
+                    sig.append(comp.conductance)
             elif isinstance(comp, LED):
                 g_led, _ = comp.companion_model(dt, method_str)
                 sig.append(g_led)
@@ -302,6 +310,8 @@ class MNASolver:
             if isinstance(comp, Ground):
                 continue
             if isinstance(comp, (Resistor, Lightbulb, Voltmeter, Ammeter)):
+                if isinstance(comp, (Voltmeter, Ammeter)) and comp.is_ideal:
+                    continue
                 self._stamp_conductance(
                     matrix_a, comp.nodes[0], comp.nodes[1], comp.conductance
                 )
@@ -344,8 +354,12 @@ class MNASolver:
                 matrix_a[idx_neg, row_k] -= 1.0
                 matrix_a[row_k, idx_neg] -= 1.0
 
-            if comp.r_internal > 0.0:
-                matrix_a[row_k, row_k] += comp.r_internal
+            if isinstance(comp, Ammeter) and getattr(comp, "is_ideal", False):
+                r_int = comp.r_internal if self.circuit.is_ammeter_in_parallel(comp) else 0.0
+            else:
+                r_int = getattr(comp, "r_internal", 0.0)
+            if r_int > 0.0:
+                matrix_a[row_k, row_k] += r_int
 
         self._matrix_a = matrix_a
         if dim > 0:
@@ -389,6 +403,9 @@ class MNASolver:
             elif isinstance(comp, ACVoltageSource):
                 row_k = self._vs_to_idx[comp.name]
                 rhs_b[row_k] = comp.voltage_at(0.0)
+            elif isinstance(comp, Ammeter) and comp.is_ideal:
+                row_k = self._vs_to_idx[comp.name]
+                rhs_b[row_k] = 0.0
             elif isinstance(comp, LED):
                 _, i_eq = comp.companion_model(0.0, "dc")
                 idx_a = self._node_to_idx.get(comp.nodes[0])
@@ -418,6 +435,9 @@ class MNASolver:
             elif isinstance(comp, (DCVoltageSource, ACVoltageSource)):
                 row_k = self._vs_to_idx[comp.name]
                 rhs_b[row_k] = comp.voltage_at(sim_time)
+            elif isinstance(comp, Ammeter) and comp.is_ideal:
+                row_k = self._vs_to_idx[comp.name]
+                rhs_b[row_k] = 0.0
             elif isinstance(comp, LED):
                 _, i_eq = comp.companion_model(dt, method_str)
                 idx_a = self._node_to_idx.get(comp.nodes[0])
@@ -532,13 +552,33 @@ class MNASolver:
             comp.voltage = v_ab
 
             if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter)):
-                i_ab = v_ab * comp.conductance
-                comp.current = i_ab
-                comp.power = v_ab * i_ab
                 if isinstance(comp, Voltmeter):
-                    comp.record_sample(0.0, comp.voltage, 0.0)
+                    if comp.is_ideal:
+                        i_ab = 0.0
+                        comp.current = 0.0
+                        comp.power = 0.0
+                        comp.record_sample(0.0, comp.voltage, 0.0)
+                    else:
+                        i_ab = v_ab * comp.conductance
+                        comp.current = i_ab
+                        comp.power = v_ab * i_ab
+                        comp.record_sample(0.0, comp.voltage, 0.0)
                 elif isinstance(comp, Ammeter):
-                    comp.record_sample(0.0, comp.current, 0.0)
+                    if comp.is_ideal:
+                        row_k = self._vs_to_idx[comp.name]
+                        i_ab = float(solution_x[row_k])
+                        comp.current = i_ab
+                        comp.power = v_ab * i_ab
+                        comp.record_sample(0.0, comp.current, 0.0)
+                    else:
+                        i_ab = v_ab * comp.conductance
+                        comp.current = i_ab
+                        comp.power = v_ab * i_ab
+                        comp.record_sample(0.0, comp.current, 0.0)
+                else:
+                    i_ab = v_ab * comp.conductance
+                    comp.current = i_ab
+                    comp.power = v_ab * i_ab
             elif isinstance(comp, LED):
                 if comp.burned_out:
                     i_ab = v_ab / comp.r_off
@@ -586,6 +626,10 @@ class MNASolver:
                 i_ab = 0.0
 
             branch_currents[comp.name] = i_ab
+
+        for comp in self.circuit.components:
+            if isinstance(comp, Voltmeter):
+                self._update_voltmeter_loading(comp)
 
         cond_num = self.compute_condition_number() if (compute_cond and dim > 0) else None
         return SolveResult(
@@ -911,14 +955,38 @@ class MNASolver:
             v_ab = v_a - v_b
 
             if isinstance(comp, (Resistor, Lightbulb, Voltmeter, Ammeter)):
-                i_ab = v_ab * comp.conductance
-                comp.voltage = v_ab
-                comp.current = i_ab
-                comp.power = v_ab * i_ab
                 if isinstance(comp, Voltmeter):
-                    comp.record_sample(t_next, comp.voltage, dt)
+                    if comp.is_ideal:
+                        i_ab = 0.0
+                        comp.voltage = v_ab
+                        comp.current = 0.0
+                        comp.power = 0.0
+                        comp.record_sample(t_next, comp.voltage, dt)
+                    else:
+                        i_ab = v_ab * comp.conductance
+                        comp.voltage = v_ab
+                        comp.current = i_ab
+                        comp.power = v_ab * i_ab
+                        comp.record_sample(t_next, comp.voltage, dt)
                 elif isinstance(comp, Ammeter):
-                    comp.record_sample(t_next, comp.current, dt)
+                    if comp.is_ideal:
+                        row_k = self._vs_to_idx[comp.name]
+                        i_ab = float(solution_x[row_k])
+                        comp.voltage = v_ab
+                        comp.current = i_ab
+                        comp.power = v_ab * i_ab
+                        comp.record_sample(t_next, comp.current, dt)
+                    else:
+                        i_ab = v_ab * comp.conductance
+                        comp.voltage = v_ab
+                        comp.current = i_ab
+                        comp.power = v_ab * i_ab
+                        comp.record_sample(t_next, comp.current, dt)
+                else:
+                    i_ab = v_ab * comp.conductance
+                    comp.voltage = v_ab
+                    comp.current = i_ab
+                    comp.power = v_ab * i_ab
             elif isinstance(comp, LED):
                 comp.voltage = v_ab
                 if comp.burned_out:
@@ -980,6 +1048,10 @@ class MNASolver:
                 i_ab = 0.0
 
             branch_currents[comp.name] = i_ab
+
+        for comp in self.circuit.components:
+            if isinstance(comp, Voltmeter):
+                self._update_voltmeter_loading(comp)
 
         self.sim_time = t_next
         self._transient_step_index += 1
@@ -1088,3 +1160,40 @@ class MNASolver:
             matrix_rebuild_count=rebuild_count,
             step_count=n_steps,
         )
+
+    def _update_voltmeter_loading(self, comp: Voltmeter) -> None:
+        """Evaluate voltmeter loading effect against circuit Thévenin resistance.
+
+        If the loading changes the circuit by >= 0.1% (loading error), format
+        the user-facing diagnostic string:
+        '{VM} draws {I_vm} from the {R_th} resistor; the reading is {pct}% lower than the unloaded voltage.'
+        """
+        if comp.is_ideal:
+            comp.loading_error_message = None
+            comp.loading_error_percent = 0.0
+            return
+
+        try:
+            r_th = self.circuit.thevenin_resistance(
+                comp.nodes[0], comp.nodes[1], exclude_component=comp.name
+            )
+        except Exception:
+            r_th = 0.0
+
+        if r_th > 0.0 and math.isfinite(r_th):
+            loading_frac = r_th / (r_th + comp.r_internal)
+            loading_pct = loading_frac * 100.0
+            if round(loading_pct, 1) >= 0.1:
+                comp.loading_error_percent = loading_pct
+                i_vm = comp.voltage / comp.r_internal
+                comp.loading_error_message = (
+                    f"{comp.name} draws {format_engineering_value(abs(i_vm), 'A', sig_figs=2)} "
+                    f"from the {format_engineering_value(r_th, 'ohm', sig_figs=3)} resistor; "
+                    f"the reading is {loading_pct:.1f}% lower than the unloaded voltage."
+                )
+            else:
+                comp.loading_error_message = None
+                comp.loading_error_percent = 0.0
+        else:
+            comp.loading_error_message = None
+            comp.loading_error_percent = 0.0

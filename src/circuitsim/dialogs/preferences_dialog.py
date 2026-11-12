@@ -46,6 +46,18 @@ class PreferencesDialog(QDialog):
             self.combo_number_format.setCurrentIndex(idx)
 
         form.addRow("Number format:", self.combo_number_format)
+
+        self.combo_meters_mode = QComboBox(self)
+        self.combo_meters_mode.setObjectName("combo_meters_mode")
+        self.combo_meters_mode.addItem("Ideal", "ideal")
+        self.combo_meters_mode.addItem("Realistic", "realistic")
+
+        current_meter_mode = settings.get_new_meters_mode()
+        idx_meter = self.combo_meters_mode.findData(current_meter_mode)
+        if idx_meter >= 0:
+            self.combo_meters_mode.setCurrentIndex(idx_meter)
+
+        form.addRow("New meters are:", self.combo_meters_mode)
         layout.addLayout(form)
 
         hint = QLabel(
@@ -69,4 +81,6 @@ class PreferencesDialog(QDialog):
         fmt = str(self.combo_number_format.currentData())
         self.settings.set_number_format(fmt)
         set_global_number_format(fmt)
+        meter_mode = str(self.combo_meters_mode.currentData())
+        self.settings.set_new_meters_mode(meter_mode)
         self.accept()

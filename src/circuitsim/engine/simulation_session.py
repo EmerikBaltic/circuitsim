@@ -209,6 +209,7 @@ class ComponentTelemetry:
     switch_arcing: bool = False
     is_over_current: bool = False
     led_color: str = ""
+    loading_error_message: str | None = None
 
 
 class DiagnosticMessage(str):
@@ -706,11 +707,17 @@ class SimulationSession:
         self,
         comp_name: str,
         param_key: str,
-        raw_value: float | str,
+        raw_value: float | str | bool,
     ) -> SimulationFrame:
         """Validate and apply a parameter change to `comp_name` live."""
         comp = self.circuit.get_component(comp_name)
-        comp.set_parameter_value(param_key, raw_value)
+        if param_key == "is_ideal":
+            comp.is_ideal = bool(raw_value)
+        elif hasattr(comp, param_key):
+            try:
+                comp.set_parameter_value(param_key, raw_value)  # type: ignore[arg-type]
+            except (KeyError, TypeError):
+                setattr(comp, param_key, raw_value)
         self.circuit.mark_modified()
         self._dt = self._compute_step_dt()
 
@@ -753,6 +760,9 @@ class SimulationSession:
             led_col = comp.color if isinstance(comp, LED) else ""
             sw_closed = comp.closed if isinstance(comp, Switch) else False
             sw_arcing = comp.arcing if isinstance(comp, Switch) else False
+            loading_err = (
+                comp.loading_error_message if isinstance(comp, Voltmeter) else None
+            )
 
             comp_map[comp.name] = ComponentTelemetry(
                 name=comp.name,
@@ -768,6 +778,7 @@ class SimulationSession:
                 switch_arcing=sw_arcing,
                 is_over_current=is_over_cur,
                 led_color=led_col,
+                loading_error_message=loading_err,
             )
 
         return SimulationFrame(

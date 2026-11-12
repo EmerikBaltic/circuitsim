@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from circuitsim.components.base import Component, ComponentParameter
 from circuitsim.components.led import LED, LED_COLOUR_PRESETS
 from circuitsim.components.lightbulb import Lightbulb
+from circuitsim.components.meters import Ammeter, Voltmeter
 from circuitsim.components.switch import Switch
 from circuitsim.dialogs.value_parser import (
     format_engineering_value,
@@ -85,14 +86,47 @@ class QuickValueDialog(QDialog):
 
         self._updating_color: bool = False
         self._updating_vf: bool = False
+        self._updating_meter: bool = False
         self.led_color_combo: QComboBox | None = None
         self.led_datasheet_lbl: QLabel | None = None
         self.led_datasheet_hint_lbl: QLabel | None = None
         self.led_burnout_cb: QCheckBox | None = None
         self.led_burnout_current_edit: QLineEdit | None = None
+        self.meter_preset_combo: QComboBox | None = None
+        self.meter_loading_notice_label: QLabel | None = None
+        self.meter_ideal_hint_lbl: QLabel | None = None
 
         form = QFormLayout()
         form.setSpacing(8)
+
+        if isinstance(component, (Voltmeter, Ammeter)):
+            self.meter_preset_combo = QComboBox(self)
+            self.meter_preset_combo.setObjectName("meter_preset_combo")
+            if isinstance(component, Voltmeter):
+                self.meter_preset_combo.addItem("Ideal", "ideal")
+                self.meter_preset_combo.addItem("10 Mohm (typical multimeter)", "10M")
+                self.meter_preset_combo.addItem("1 Mohm", "1M")
+                self.meter_preset_combo.addItem("Custom", "custom")
+                if component.is_ideal:
+                    self.meter_preset_combo.setCurrentText("Ideal")
+                elif math.isclose(component.r_internal, 10e6, rel_tol=1e-3):
+                    self.meter_preset_combo.setCurrentText("10 Mohm (typical multimeter)")
+                elif math.isclose(component.r_internal, 1e6, rel_tol=1e-3):
+                    self.meter_preset_combo.setCurrentText("1 Mohm")
+                else:
+                    self.meter_preset_combo.setCurrentText("Custom")
+            else:
+                self.meter_preset_combo.addItem("Ideal (0 V branch)", "ideal")
+                self.meter_preset_combo.addItem("1 mohm", "1m")
+                self.meter_preset_combo.addItem("Custom", "custom")
+                if component.is_ideal:
+                    self.meter_preset_combo.setCurrentText("Ideal (0 V branch)")
+                elif math.isclose(component.r_internal, 1e-3, rel_tol=1e-3):
+                    self.meter_preset_combo.setCurrentText("1 mohm")
+                else:
+                    self.meter_preset_combo.setCurrentText("Custom")
+
+            self.meter_preset_combo.currentTextChanged.connect(self._on_meter_preset_changed)
 
         if isinstance(component, LED):
             self.led_color_combo = QComboBox(self)
@@ -144,6 +178,46 @@ class QuickValueDialog(QDialog):
                 )
                 field_vbox.addWidget(arc_hint_lbl)
 
+            if isinstance(component, (Voltmeter, Ammeter)) and spec.key == "r_internal":
+                if self.meter_preset_combo is not None:
+                    field_vbox.insertWidget(0, self.meter_preset_combo)
+
+                if isinstance(component, Voltmeter):
+                    self.meter_ideal_hint_lbl = QLabel(
+                        "Reads the voltage between its nets without loading the circuit.", self
+                    )
+                    self.meter_ideal_hint_lbl.setObjectName("meter_ideal_hint_lbl")
+                    self.meter_ideal_hint_lbl.setWordWrap(True)
+                    self.meter_ideal_hint_lbl.setStyleSheet("color: #58A6FF; font-size: 11px;")
+                    self.meter_ideal_hint_lbl.setVisible(component.is_ideal)
+                    field_vbox.addWidget(self.meter_ideal_hint_lbl)
+
+                    if component.loading_error_message:
+                        self.meter_loading_notice_label = QLabel(component.loading_error_message, self)
+                        self.meter_loading_notice_label.setObjectName("meter_loading_notice_label")
+                        self.meter_loading_notice_label.setWordWrap(True)
+                        self.meter_loading_notice_label.setStyleSheet(
+                            "color: #E3B341; font-size: 11px; font-weight: 500; padding: 4px; "
+                            "background: rgba(227, 179, 65, 0.1); border: 1px solid #E3B341; border-radius: 4px;"
+                        )
+                        field_vbox.addWidget(self.meter_loading_notice_label)
+                elif isinstance(component, Ammeter):
+                    self.meter_ideal_hint_lbl = QLabel(
+                        "0 V branch: keeps parallel and loop diagnostics.", self
+                    )
+                    self.meter_ideal_hint_lbl.setObjectName("meter_ideal_hint_lbl")
+                    self.meter_ideal_hint_lbl.setWordWrap(True)
+                    self.meter_ideal_hint_lbl.setStyleSheet("color: #58A6FF; font-size: 11px;")
+                    self.meter_ideal_hint_lbl.setVisible(component.is_ideal)
+                    field_vbox.addWidget(self.meter_ideal_hint_lbl)
+
+                if component.is_ideal:
+                    line_edit.setEnabled(False)
+                    line_edit.setText("Ideal")
+                    preview_lbl.setText(
+                        "Ideal (no loading)" if isinstance(component, Voltmeter) else "Ideal (0 V branch)"
+                    )
+
             if isinstance(component, LED) and spec.key == "forward_voltage":
                 cname = component.color_name
                 preset = LED_COLOUR_PRESETS.get(cname, LED_COLOUR_PRESETS["Red"])
@@ -175,7 +249,13 @@ class QuickValueDialog(QDialog):
             )
             self._update_field_preview(spec)
 
-            form.addRow(f"{spec.label}:", field_container)
+            if isinstance(component, Voltmeter) and spec.key == "r_internal":
+                row_label = "Input resistance:"
+            elif isinstance(component, Ammeter) and spec.key == "r_internal":
+                row_label = "Series resistance:"
+            else:
+                row_label = f"{spec.label}:"
+            form.addRow(row_label, field_container)
 
         self.switch_closed_cb: QCheckBox | None = None
         if isinstance(component, Switch):
@@ -277,9 +357,71 @@ class QuickValueDialog(QDialog):
         elif color_name == "Custom" and self.led_datasheet_lbl is not None:
             self.led_datasheet_lbl.setText("Forward voltage: user defined (Custom)")
 
+    def _on_meter_preset_changed(self, text: str) -> None:
+        if self._updating_meter or not isinstance(self.component, (Voltmeter, Ammeter)):
+            return
+        self._updating_meter = True
+        low = text.lower()
+        line_edit = self.inputs.get("r_internal")
+        is_ideal = "ideal" in low
+
+        if self.meter_ideal_hint_lbl is not None:
+            self.meter_ideal_hint_lbl.setVisible(is_ideal)
+
+        if line_edit is not None:
+            if is_ideal:
+                line_edit.setEnabled(False)
+                line_edit.setText("Ideal")
+            else:
+                line_edit.setEnabled(True)
+                if "10" in text:
+                    line_edit.setText("10M")
+                elif isinstance(self.component, Voltmeter) and ("1m" in low or "1 mohm" in low or "1 meg" in low):
+                    line_edit.setText("1M")
+                elif isinstance(self.component, Ammeter) and ("1m" in low or "1 mohm" in low):
+                    line_edit.setText("1m")
+                elif "custom" in low:
+                    if line_edit.text() in ("Ideal", ""):
+                        line_edit.setText(
+                            self.component.format_parameter_value("r_internal")
+                        )
+            spec = next((s for s in self._param_specs if s.key == "r_internal"), None)
+            if spec is not None:
+                self._update_field_preview(spec)
+
+        self._updating_meter = False
+
     def _on_field_text_changed(self, spec: ComponentParameter) -> None:
         self._clear_error()
         self._update_field_preview(spec)
+
+        if (
+            isinstance(self.component, (Voltmeter, Ammeter))
+            and spec.key == "r_internal"
+            and not self._updating_meter
+            and self.meter_preset_combo is not None
+        ):
+            curr_text = self.inputs[spec.key].text().strip()
+            curr_preset = self.meter_preset_combo.currentText().lower()
+            if "ideal" not in curr_preset and curr_preset != "custom":
+                try:
+                    val = parse_engineering_value(curr_text)
+                    if isinstance(self.component, Voltmeter):
+                        if "10" in curr_preset and not math.isclose(val, 10e6, rel_tol=1e-3):
+                            self._updating_meter = True
+                            self.meter_preset_combo.setCurrentText("Custom")
+                            self._updating_meter = False
+                        elif "1 m" in curr_preset and not math.isclose(val, 1e6, rel_tol=1e-3):
+                            self._updating_meter = True
+                            self.meter_preset_combo.setCurrentText("Custom")
+                            self._updating_meter = False
+                    elif isinstance(self.component, Ammeter):
+                        if "1 m" in curr_preset and not math.isclose(val, 1e-3, rel_tol=1e-3):
+                            self._updating_meter = True
+                            self.meter_preset_combo.setCurrentText("Custom")
+                            self._updating_meter = False
+                except Exception:
+                    pass
 
         if (
             isinstance(self.component, LED)
@@ -305,6 +447,10 @@ class QuickValueDialog(QDialog):
         lbl = self.preview_labels.get(spec.key)
         if lbl is None:
             return
+        if isinstance(self.component, (Voltmeter, Ammeter)) and spec.key == "r_internal":
+            if self.meter_preset_combo is not None and "ideal" in self.meter_preset_combo.currentText().lower():
+                lbl.setText("Ideal (no loading)" if isinstance(self.component, Voltmeter) else "Ideal (0 V branch)")
+                return
         raw_text = self.inputs[spec.key].text().strip()
         try:
             val = parse_engineering_value(raw_text)
@@ -324,10 +470,18 @@ class QuickValueDialog(QDialog):
             preview_text += " (applies at t = 0 after Stop + Run)"
         lbl.setText(preview_text)
 
-    def validate_inputs(self) -> tuple[dict[str, float] | None, str | None]:
+    def validate_inputs(self) -> tuple[dict[str, object] | None, str | None]:
         """Validate all parameter fields and return `(parsed_dict, error_message)`."""
-        parsed_map: dict[str, float] = {}
+        parsed_map: dict[str, object] = {}
         for spec in self._param_specs:
+            if isinstance(self.component, (Voltmeter, Ammeter)) and spec.key == "r_internal":
+                if self.meter_preset_combo is not None and "ideal" in self.meter_preset_combo.currentText().lower():
+                    parsed_map["is_ideal"] = True
+                    parsed_map["r_internal"] = self.component.r_internal
+                    continue
+                else:
+                    parsed_map["is_ideal"] = False
+
             raw_text = self.inputs[spec.key].text().strip()
             try:
                 val = parse_engineering_value(raw_text)

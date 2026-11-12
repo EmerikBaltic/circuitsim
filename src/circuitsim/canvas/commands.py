@@ -304,12 +304,15 @@ class EditComponentParametersCommand(QUndoCommand):
         comp.show_value = show_val
         self.item.live_display_value = None
         self.item.update()
-        numeric_params = {
-            k: float(v)
-            for k, v in params.items()
-            if isinstance(v, (int, float))
-        }
-        self.scene.component_parameters_edited.emit(comp.name, numeric_params)
+        emitted_params: dict[str, object] = {}
+        for k, v in params.items():
+            if isinstance(v, bool):
+                emitted_params[k] = v
+            elif isinstance(v, (int, float)):
+                emitted_params[k] = float(v)
+            else:
+                emitted_params[k] = v
+        self.scene.component_parameters_edited.emit(comp.name, emitted_params)
         self.scene.selection_info_changed.emit(
             self.item if self.item.isSelected() else None
         )

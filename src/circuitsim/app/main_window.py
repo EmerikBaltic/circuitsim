@@ -152,7 +152,9 @@ class MainWindow(QMainWindow):
         set_global_number_format(self.settings.get_number_format())
         self.theme: ThemeMode = initial_theme
         self.symbol_library = SymbolLibrary()
-        self.circuit_scene = CircuitScene(self.symbol_library, theme=self.theme)
+        self.circuit_scene = CircuitScene(
+            self.symbol_library, theme=self.theme, settings=self.settings
+        )
         self.circuit_view = CircuitView(self.circuit_scene)
         self.setCentralWidget(self.circuit_view)
 

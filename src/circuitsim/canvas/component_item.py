@@ -327,6 +327,11 @@ class ComponentItem(QGraphicsObject):
             lines.append("Voltage: --")
             lines.append("Current: --")
             lines.append("Power: --")
+        if (
+            isinstance(self.component, Voltmeter)
+            and getattr(self.component, "loading_error_message", None)
+        ):
+            lines.append(self.component.loading_error_message)
         return "\n".join(lines)
 
     def set_diagnostic(
@@ -372,6 +377,8 @@ class ComponentItem(QGraphicsObject):
             self.component.arcing = telemetry.switch_arcing
         elif isinstance(self.component, (Voltmeter, Ammeter)):
             self.component.has_reading = not telemetry.display_value.startswith("--")
+            if isinstance(self.component, Voltmeter):
+                self.component.loading_error_message = telemetry.loading_error_message
 
         self.setToolTip(self.get_live_tooltip(is_running=True))
         self.update()

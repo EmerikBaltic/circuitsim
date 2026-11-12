@@ -14,7 +14,22 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle Complete, Paint Safety & Crash Handler Hardening Complete (277 Passing Tests)
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle Complete, Paint Safety & Crash Handler Hardening Complete, Meter Loading & Ideal Modes Complete (289 Passing Tests)
+
+## Stray Background Under LED, Problems Panel Close Button & Meter Loading (Items 1–3)
+- **Item 1: Stray Background Under the LED**:
+  - *Root Cause*: In `ComponentItem._paint_impl()`, components with `show_value=True` but empty formatted value text (like an LED when simulation is stopped) evaluated `QFontMetrics.boundingRect(val_rect.toRect(), text_align, "")` to a 0-width rectangle located 25–43 px below the component origin. Calling `.adjusted(-3, -1, 3, 1)` expanded that zero-width bounding box into an 84-pixel rectangle `QRect(-3, 27, 6, 14)` which was painted with `painter.fillRect(val_box, palette.canvas_bg)` onto transparent scene space ~20 px below the LED.
+  - *Fix*: Guarded value/label plate painting to require non-empty text after stripping, and tightened `boundingRect()` to hug the visual symbol within 2 px.
+- **Item 2: Problems Panel Close Button & Glyph Fixes**:
+  - Replaced native Windows "Segoe UI" U+2715 (`✕`) glyphs—which rendered as empty tofu boxes ($\square$) on Windows—with crisp vector cross rendering in both `ProblemsCloseButton.paintEvent` and `make_severity_icon("error")`.
+  - Added accessible close button with focus outline, Space/Enter keyboard activation, and tooltip `"Close Problems panel (F8)"`.
+- **Item 3: Meter Loading (Visible and Optional, Engine Defaults Unchanged)**:
+  - *Ideal & Realistic Meter Modes*: Added `is_ideal: bool` to `Voltmeter` and `Ammeter`. Ideal voltmeters draw 0 A (infinite input resistance) without generating false floating-node warnings. Ideal ammeters model a 0 V branch constraint with 0 V drop.
+  - *Dialog Presets*: Added input resistance presets to `QuickValueDialog` for Voltmeter (`Ideal`, `10 Mohm (typical multimeter)`, `1 Mohm`, `Custom`) and series resistance presets for Ammeter (`Ideal (0 V branch)`, `1 mohm`, `Custom`). Presets update live during simulation and support full undo/redo.
+  - *Edit > Preferences*: Added `"New meters are: Ideal / Realistic"` setting defaulting to `"Ideal"` for newly placed palette meters, while engine constructors (`Voltmeter(...)`, `Ammeter(...)`) retain realistic defaults ($10\text{ M}\Omega$, $1\text{ m}\Omega$) so existing tests and bundled examples are unaffected.
+  - *Voltmeter Loading Warnings*: Added network Thévenin resistance computation to evaluate voltmeter loading. When loading changes the measured voltage by $\ge 0.1\%$, the hover tooltip and editor dialog display: `"VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."`
+  - *Educational Notes*: Added dedicated educational section in `LEARNING_NOTES.md` with hand-calculated analysis (30 mA source into 10 kΩ giving 299.70 V vs 300 V, 30 A source current divider giving 29.97 A vs 30 A, GMIN shunt analysis at high voltages) and 3 student exercises with complete step-by-step solutions.
+
 
 ## Theme Palette Completeness, Crash Handler Protection & Paint Safety (Items 1–7)
 - **Item 1: Reproduction Test**:

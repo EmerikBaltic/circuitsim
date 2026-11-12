@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 import math
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
+
+if TYPE_CHECKING:
+    from circuitsim.app.settings import AppSettings
 
 from PySide6.QtCore import QLineF, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QUndoStack
@@ -85,10 +88,12 @@ class CircuitScene(QGraphicsScene):
         symbol_library: SymbolLibrary,
         *,
         theme: ThemeMode = ThemeMode.DARK,
+        settings: AppSettings | None = None,
     ) -> None:
         super().__init__()
         self.symbol_library: SymbolLibrary = symbol_library
         self.theme: ThemeMode = theme
+        self.settings: AppSettings | None = settings
         self.show_grid: bool = True
         self.undo_stack: QUndoStack = QUndoStack(self)
 
@@ -381,13 +386,23 @@ class CircuitScene(QGraphicsScene):
         """Instantiate and place a new component snapped to the grid via `QUndoStack`."""
         name = self.next_component_name(component_id)
         model = create_default_component_model(component_id, name)
+        if component_id in ("voltmeter", "ammeter"):
+            meter_mode = (
+                self.settings.get_new_meters_mode()
+                if self.settings is not None
+                else "ideal"
+            )
+            if meter_mode == "ideal":
+                model.is_ideal = True
         item = ComponentItem(
             model,
             self.symbol_library,
             theme=self.theme,
             is_ghost=False,
         )
-        sx, sy = snap_to_grid(scene_pos.x(), scene_pos.y(), GRID_PITCH_PX)
+        px = scene_pos[0] if isinstance(scene_pos, (tuple, list)) else scene_pos.x()
+        py = scene_pos[1] if isinstance(scene_pos, (tuple, list)) else scene_pos.y()
+        sx, sy = snap_to_grid(px, py, GRID_PITCH_PX)
         item.setPos(sx, sy)
         if rotation_deg:
             item.set_rotation_deg(rotation_deg)

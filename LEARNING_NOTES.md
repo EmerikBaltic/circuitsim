@@ -458,3 +458,116 @@ def safe_paint_wrapper(item, painter: QPainter, draw_func) -> None:
             pass  # Ensure nothing escapes under any circumstance
 ```
 
+---
+
+### Meter Loading: Voltmeter Input Resistance, Ammeter Burden, and Measurement Error
+
+#### 1. Why Real Meters Disturb the Circuit
+In basic textbook circuit theory, meters are assumed to be passive observers:
+- An **ideal voltmeter** has infinite input resistance ($R_{in} = \infty\,\Omega$, $0\text{ S}$ conductance), drawing zero current and leaving all node voltages unchanged.
+- An **ideal ammeter** has zero series resistance ($R_{in} = 0\,\Omega$, a $0\text{ V}$ short branch), producing zero burden voltage and leaving all branch currents unchanged.
+
+In real laboratory instruments, physical limitations require energy to be sampled:
+- A standard digital multimeter (DMM) typically has a DC input resistance of $10\text{ M}\Omega$ (older analog meters or budget digital meters may be $1\text{ M}\Omega$ or $20\text{ k}\Omega/\text{V}$). When connected across a high-impedance circuit, this finite resistance shunts current away from the circuit, reducing the measured voltage.
+- A physical ammeter passes current through an internal shunt resistor to measure the resulting voltage drop (burden voltage), introducing small series resistance ($1\text{ m}\Omega$ on high-current ranges, or several ohms on milliamp ranges).
+
+#### 2. The Analytical Numbers: Worked Example
+Consider an ideal $30\text{ mA}$ DC current source feeding a $10\text{ k}\Omega$ resistor ($R_1 = 10\text{ k}\Omega$):
+
+1. **Unloaded Circuit**:
+   Without a voltmeter connected:
+   $$V = I \times R_1 = 30\text{ mA} \times 10\text{ k}\Omega = 300.0\text{ V}$$
+   *(In numerical MNA solvers with a numerical conductance floor $G_{MIN} = 10^{-12}\text{ S}$ to ground, $V = \frac{30\text{ mA}}{10^{-4} + 10^{-12}} \approx 299.999997\text{ V}$, matching 300 V to within $10^{-8}$ relative tolerance).*
+
+2. **Loaded with a Realistic 10 MΩ Voltmeter**:
+   Connecting a $10\text{ M}\Omega$ voltmeter in parallel with the $10\text{ k}\Omega$ resistor creates an effective parallel resistance:
+   $$R_{eq} = 10\text{ k}\Omega \parallel 10\text{ M}\Omega = \frac{10000 \times 10^7}{10000 + 10^7} = \frac{10^8}{10010} \approx 9990.00999\,\Omega \approx 9990.01\,\Omega$$
+   The resulting loaded voltage measured by the meter is:
+   $$V_{loaded} = 30\text{ mA} \times 9990.01\,\Omega = 299.7003\text{ V} \approx 299.70\text{ V}$$
+   The current drawn by the voltmeter itself from the resistor node is:
+   $$I_{vm} = \frac{V_{loaded}}{R_{vm}} = \frac{299.70\text{ V}}{10\text{ M}\Omega} \approx 29.97\,\mu\text{A} \approx 30\,\mu\text{A}$$
+   The fractional loading error relative to the unloaded Thévenin voltage $V_{th}$ is given directly by the voltage divider between $R_{th}$ and $R_{vm}$:
+   $$\text{Loading Error} = \frac{V_{th} - V_{loaded}}{V_{th}} = \frac{R_{th}}{R_{th} + R_{vm}} = \frac{10\text{ k}\Omega}{10010\text{ k}\Omega} \approx 0.0999001\% \approx 0.1\%$$
+   The measured reading is $0.1\%$ lower than the unloaded voltage.
+
+3. **Current Division with a 30 A Source**:
+   If a $30\text{ A}$ source drives the $10\text{ k}\Omega$ resistor in parallel with the $10\text{ M}\Omega$ voltmeter, an ammeter placed in series with the resistor measures the branch current. By current division:
+   $$I_{\text{resistor}} = 30\text{ A} \times \frac{10\text{ M}\Omega}{10\text{ M}\Omega + 10\text{ k}\Omega} = 30\text{ A} \times \frac{1000}{1001} \approx 29.97003\text{ A} \approx 29.97\text{ A}$$
+   The remaining $30\text{ mA}$ bypasses the resistor through the voltmeter.
+
+#### 3. Educational Design: Ideal vs Realistic Meters in CircuitSim
+To balance engineering realism with beginner learning:
+- **Engine Constructors**: `Voltmeter(name, ...)` and `Ammeter(name, ...)` maintain their realistic physical defaults ($10\text{ M}\Omega$ and $1\text{ m}\Omega$). Existing unit tests, textbook calculations, and bundled examples continue to evaluate exact physical equations.
+- **Palette Defaults**: `Edit > Preferences` provides `"New meters are: Ideal / Realistic"`, defaulting to `"Ideal"` for components dragged from the palette.
+- **Double-Click Quick Edit Dialog**:
+  - Voltmeter provides presets: `"Ideal"` (infinite impedance, zero loading), `"10 Mohm (typical multimeter)"`, `"1 Mohm"`, and `"Custom"`.
+  - Ammeter provides presets: `"Ideal (0 V branch)"`, `"1 mohm"`, and `"Custom"`.
+- **Automatic Loading Warning**:
+  Whenever a realistic voltmeter changes the voltage of the measured net by $\ge 0.1\%$, CircuitSim detects the loading error using the network Thévenin resistance and displays an explanatory notice in the live hover tooltip and parameter dialog:
+  `"VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."`
+
+---
+
+#### Exercise 1: High-Impedance Voltage Divider Loading
+**Question**: A voltage divider consists of two $100\text{ k}\Omega$ resistors in series across a $10\text{ V}$ ideal DC voltage source.
+1. What is the open-circuit (unloaded) voltage $V_{out}$ across the lower resistor?
+2. What voltage is measured by a budget multimeter with $R_{in} = 1\text{ M}\Omega$? What is the percentage loading error?
+3. What voltage is measured by a standard bench DMM with $R_{in} = 10\text{ M}\Omega$? What is the percentage loading error?
+
+**Solution**:
+1. Unloaded output:
+   $$V_{out} = 10\text{ V} \times \frac{100\text{ k}\Omega}{100\text{ k}\Omega + 100\text{ k}\Omega} = 5.000\text{ V}$$
+   The Thévenin equivalent resistance looking into the output terminals is:
+   $$R_{th} = 100\text{ k}\Omega \parallel 100\text{ k}\Omega = 50\text{ k}\Omega$$
+
+2. With $1\text{ M}\Omega$ meter ($R_{vm} = 1000\text{ k}\Omega$):
+   The effective resistance of the lower branch is:
+   $$R_{lower} = 100\text{ k}\Omega \parallel 1000\text{ k}\Omega = \frac{100 \times 1000}{1100} = 90.909\text{ k}\Omega$$
+   The measured voltage is:
+   $$V_{m} = 10\text{ V} \times \frac{90.909\text{ k}\Omega}{100\text{ k}\Omega + 90.909\text{ k}\Omega} = 4.762\text{ V}$$
+   Loading error:
+   $$\text{Error} = \frac{5.000 - 4.762}{5.000} \times 100\% = \frac{50\text{ k}\Omega}{50\text{ k}\Omega + 1000\text{ k}\Omega} \times 100\% = 4.76\%$$
+   The reading is $4.76\%$ lower than the true unloaded voltage.
+
+3. With $10\text{ M}\Omega$ meter ($R_{vm} = 10,000\text{ k}\Omega$):
+   Using the Thévenin loading formula:
+   $$\text{Error} = \frac{R_{th}}{R_{th} + R_{vm}} = \frac{50\text{ k}\Omega}{50\text{ k}\Omega + 10000\text{ k}\Omega} = \frac{50}{10050} \approx 0.498\% \approx 0.5\%$$
+   $$V_m = 5.000\text{ V} \times (1 - 0.004975) = 4.975\text{ V}$$
+   The reading is only $0.5\%$ lower, illustrating why high input resistance is critical when probing high-impedance networks.
+
+---
+
+#### Exercise 2: Maximum Source Resistance for Specified Voltmeter Accuracy
+**Question**: An engineer requires that voltmeter loading error not exceed $0.1\%$ when probing a sensor network using a standard $10\text{ M}\Omega$ digital multimeter. What is the maximum allowable Thévenin resistance $R_{th}$ of the sensor network at the probe points?
+
+**Solution**:
+The loading error fraction is:
+$$\frac{\Delta V}{V_{th}} = \frac{R_{th}}{R_{th} + R_{vm}} \le 0.001$$
+Solving for $R_{th}$:
+$$R_{th} \le 0.001 \times (R_{th} + R_{vm})$$
+$$R_{th} \times (1 - 0.001) \le 0.001 \times R_{vm}$$
+$$R_{th} \le \frac{0.001}{0.999} \times 10\text{ M}\Omega \approx 0.001001 \times 10^7\,\Omega \approx 10,010\,\Omega \approx 10\text{ k}\Omega$$
+To keep voltmeter loading error under $0.1\%$ with a $10\text{ M}\Omega$ meter, the network Thévenin resistance must not exceed approximately $10\text{ k}\Omega$.
+
+---
+
+#### Exercise 3: Ammeter Burden Voltage and Series Resistance Effect
+**Question**: A $1.5\text{ V}$ alkaline cell powers a low-resistance filament lamp drawing $1.0\text{ A}$ ($R_{lamp} = 1.5\,\Omega$).
+1. If an ammeter with $R_m = 50\text{ m}\Omega$ series resistance is inserted to measure the current, what is the actual measured current?
+2. What burden voltage is dropped across the ammeter?
+3. What is the percentage reduction in current caused by the presence of the ammeter?
+
+**Solution**:
+1. Without the ammeter, $I_0 = \frac{1.5\text{ V}}{1.5\,\Omega} = 1.000\text{ A}$.
+   With the ammeter inserted in series:
+   $$R_{total} = R_{lamp} + R_m = 1.5\,\Omega + 0.050\,\Omega = 1.550\,\Omega$$
+   The measured current is:
+   $$I_m = \frac{1.5\text{ V}}{1.550\,\Omega} \approx 0.9677\text{ A} \approx 0.968\text{ A}$$
+
+2. Burden voltage across the ammeter:
+   $$V_{burden} = I_m \times R_m = 0.9677\text{ A} \times 0.050\,\Omega = 0.0484\text{ V} \approx 48.4\text{ mV}$$
+
+3. Percentage reduction in current:
+   $$\text{Reduction} = \frac{1.000 - 0.9677}{1.000} \times 100\% = \frac{R_m}{R_{lamp} + R_m} \times 100\% = \frac{0.050}{1.550} \times 100\% \approx 3.23\%$$
+   The ammeter introduces a $3.23\%$ error. Using an ammeter with $R_m = 1\text{ m}\Omega$ (or an Ideal 0 V branch) reduces this burden error to under $0.07\%$.
+

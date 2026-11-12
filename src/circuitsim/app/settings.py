@@ -130,3 +130,20 @@ class AppSettings:
             )
         self._data["number_format"] = fmt
         self.save()
+
+    # -------------------------------------------------------------
+    # New meters default mode: Ideal vs Realistic
+    # -------------------------------------------------------------
+    def get_new_meters_mode(self) -> str:
+        """Return 'ideal' (default) or 'realistic' for newly placed meters."""
+        return str(self._data.get("new_meters_mode", "ideal"))
+
+    def set_new_meters_mode(self, mode: str) -> None:
+        """Set whether newly placed meters default to ideal or realistic."""
+        mode_clean = str(mode).strip().lower()
+        if mode_clean not in ("ideal", "realistic"):
+            raise ValueError(
+                f"Invalid meter mode {mode!r}, expected 'ideal' or 'realistic'."
+            )
+        self._data["new_meters_mode"] = mode_clean
+        self.save()

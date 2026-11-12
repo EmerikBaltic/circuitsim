@@ -126,6 +126,7 @@ class Voltmeter(_BaseMeter):
         node_neg: str,
         *,
         r_internal: float | str = 10e6,
+        is_ideal: bool = False,
         mode: MeterMode | str = MeterMode.INSTANTANEOUS,
         window_duration: float = 0.1,
         label: str | None = None,
@@ -143,10 +144,26 @@ class Voltmeter(_BaseMeter):
             show_value=show_value,
             color=color,
         )
+        self.is_ideal: bool = bool(is_ideal)
+        self.loading_error_percent: float | None = None
+        self.loading_error_message: str | None = None
+
+    @property
+    def conductance(self) -> float:
+        """Conductance in Siemens (0.0 if ideal / infinite resistance)."""
+        if self.is_ideal:
+            return 0.0
+        return 1.0 / self.r_internal
 
     @property
     def component_type(self) -> str:
         return "voltmeter"
+
+    def reset_state(self) -> None:
+        """Clear recorded waveform history, electrical readings, and loading telemetry."""
+        super().reset_state()
+        self.loading_error_percent = None
+        self.loading_error_message = None
 
     def _instantaneous_value(self) -> float:
         return self.voltage
@@ -172,6 +189,7 @@ class Ammeter(_BaseMeter):
         node_neg: str,
         *,
         r_internal: float | str = 1e-3,
+        is_ideal: bool = False,
         mode: MeterMode | str = MeterMode.INSTANTANEOUS,
         window_duration: float = 0.1,
         label: str | None = None,
@@ -189,6 +207,7 @@ class Ammeter(_BaseMeter):
             show_value=show_value,
             color=color,
         )
+        self.is_ideal: bool = bool(is_ideal)
 
     @property
     def component_type(self) -> str:

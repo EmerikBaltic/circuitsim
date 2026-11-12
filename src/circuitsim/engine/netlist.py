@@ -163,6 +163,8 @@ class Circuit:
                 zeroed_vs_branches.append((comp.nodes[0], comp.nodes[1], comp.r_internal))
             elif isinstance(comp, Inductor) and comp.dcr == 0.0:
                 zeroed_vs_branches.append((comp.nodes[0], comp.nodes[1], 0.0))
+            elif isinstance(comp, Ammeter) and getattr(comp, "is_ideal", False):
+                zeroed_vs_branches.append((comp.nodes[0], comp.nodes[1], 0.0))
 
         n_nodes = len(non_gnd)
         n_vs = len(zeroed_vs_branches)
@@ -179,6 +181,8 @@ class Circuit:
                 if comp.name == exclude_component or isinstance(
                     comp, (Ground, Capacitor, DCVoltageSource, ACVoltageSource)
                 ):
+                    continue
+                if isinstance(comp, Ammeter) and getattr(comp, "is_ideal", False):
                     continue
                 g = 0.0
                 if isinstance(comp, (Resistor, Switch, Lightbulb, Voltmeter, Ammeter, LED)):
@@ -228,6 +232,27 @@ class Circuit:
         va = float(sol[idx_a]) if idx_a is not None else 0.0
         vb = float(sol[idx_b]) if idx_b is not None else 0.0
         return max(0.0, va - vb)
+
+    def is_ammeter_in_parallel(self, comp: Ammeter) -> bool:
+        """Return True if comp is connected in parallel across a voltage source or short."""
+        if not isinstance(comp, Ammeter) or len(comp.nodes) < 2:
+            return False
+        gnd_nodes = self.grounded_nodes()
+
+        def canonical(node: str) -> str:
+            return "__GND__" if node in gnd_nodes else node
+
+        c_a = canonical(comp.nodes[0])
+        c_b = canonical(comp.nodes[1])
+        if c_a == c_b:
+            return True
+
+        battery_dsu = _DisjointSet()
+        for c in self._components.values():
+            if isinstance(c, (DCVoltageSource, ACVoltageSource)):
+                battery_dsu.union(canonical(c.nodes[0]), canonical(c.nodes[1]))
+
+        return battery_dsu.find(c_a) == battery_dsu.find(c_b)
 
     def validate_topology(self) -> list[CircuitWarning]:
         """Validate the circuit graph for fatal errors and non-fatal warnings.

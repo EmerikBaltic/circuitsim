@@ -88,10 +88,10 @@ _DEFAULT_PARAMETERS_BY_TYPE: dict[str, tuple[ComponentParameter, ...]] = {
         ComponentParameter("v_breakdown", "Breakdown Voltage", "V"),
     ),
     "voltmeter": (
-        ComponentParameter("r_internal", "Internal Resistance", "Ω"),
+        ComponentParameter("r_internal", "Input Resistance", "Ω"),
     ),
     "ammeter": (
-        ComponentParameter("r_internal", "Internal Resistance", "Ω"),
+        ComponentParameter("r_internal", "Series Resistance", "Ω"),
     ),
     "ground": (),
 }

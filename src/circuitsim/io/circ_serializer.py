@@ -65,8 +65,8 @@ _EXTRA_SETTINGS: dict[str, dict[str, str]] = {
         "burnout_enabled": "bool",
         "burnout_current": "float_or_none",
     },
-    "voltmeter": {"mode": "str"},
-    "ammeter": {"mode": "str"},
+    "voltmeter": {"mode": "str", "is_ideal": "bool"},
+    "ammeter": {"mode": "str", "is_ideal": "bool"},
 }
 
 # Editable parameters that may legitimately be "none" (feature switched off).
