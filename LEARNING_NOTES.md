@@ -250,4 +250,106 @@ Suppose the user deletes component $R_4$, and then deletes component $R_3$.
 ## Milestone 1 (Steps A & B): Modified Nodal Analysis (MNA), Companion Models & Switching Transients
 
 1. [`src/circuitsim/dialogs/value_parser.py`](src/circuitsim/dialogs/value_parser.py) — Case-sensitive engineering notation parser (`"4.7k"`, `"15m"`, `"10M"`).
-2. [`src/circuitsim/components/`](src/circuitsim/components/) & [`src/circuitsim/engine/`](src/circuitsim/engine/) — Companion models and MNA solver ($\mathbf{A}\mathbf{x} = \mathbf{b}$) using cached `scipy.linalg.lu_factor` / `lu_solve`, Backward Euler switching/arc settling, and Trapezoidal integration.
+2. [`src/circuitsim/components/`](src/circuitsim/components/) & [`src/circuitsim/engine/`](src/circuitsim/engine/) — Companion models and MNA solver ($\mathbf{A}\mathbf{x} = \mathbf{b}$) using cached `scipy.linalg.lu_factor` / `lu_solve`, Backward Euler switching/arc settling, and Trapezoidal integration.
+
+---
+
+## Qt Object Lifetime, Destruction Signal Traps, and Clean Shutdown Architecture
+
+When integrating Python (via PySide6 / Shiboken) with Qt's C++ object model, shutdown bugs frequently appear if object ownership and teardown sequencing are not strictly coordinated.
+
+### 1. Dual Ownership & Shiboken Invalidation
+- **Two Worlds**: In PySide6, a Qt object consists of a lightweight Python wrapper object and a corresponding underlying C++ instance (`QObject`).
+- **Parent-Child Hierarchy**: When a `QObject` is given a parent (`QObject(parent)` or `scene.undo_stack = QUndoStack(scene)`), C++ takes primary ownership of memory lifetime. When the parent C++ object is deleted (e.g. during widget destruction or when `CircuitScene` is destroyed), Qt automatically deletes all child C++ objects.
+- **Dangling Wrapper**: The Python wrapper variable (such as `self.circuit_scene.undo_stack` or a bound method closure) might still remain referenced in Python scope. However, Shiboken marks the underlying C++ pointer as `nullptr` / deleted.
+- **The Shiboken Error**: Calling *any* method on that Python wrapper (e.g., `undo_stack.isClean()`) raises:
+  `RuntimeError: libshiboken: Internal C++ object (PySide6.QtGui.QUndoStack) already deleted.`
+
+### 2. The Destruction Signal Trap
+- Many developers assume signals are only emitted during normal user actions. But several Qt classes emit signals **during their C++ destructor** or during teardown:
+  - `QUndoStack` clears its internal command list when being destroyed. If any command was present or the clean state flips, it emits `cleanChanged(bool)`.
+  - `QGraphicsScene` clears items during destruction, which can emit selection or geometry change signals.
+- If a signal was connected via `undo_stack.cleanChanged.connect(...)` to a slot on `MainWindow` (or an anonymous lambda `lambda _clean: self._update_window_title()`), the signal fires while the application or scene is in the middle of being destroyed.
+- The slot executes, tries to query `undo_stack.isClean()` or access sibling widgets, and hits an already-deleted C++ object.
+
+### 3. Safe Shutdown Order
+For any non-trivial Qt application involving background threads/workers, undo stacks, and top-level windows, the exit sequence in `closeEvent(event)` must follow a strict, deterministic order:
+
+```mermaid
+flowchart TD
+    A["1. User Close Request (closeEvent)"] --> B{"Has unsaved changes?"}
+    B -- Yes --> C["Prompt User (Save / Discard / Cancel)"]
+    C -- Cancel --> D["event.ignore() - Abort close"]
+    C -- Discard / Saved --> E["2. Set Closing Flag: self._is_closing = True"]
+    B -- No --> E
+    E --> F["3. Stop Background Workers (sim_controller.shutdown(), QThread.wait())"]
+    F --> G["4. Disconnect Signals (undo_stack.cleanChanged, worker.frame_ready)"]
+    G --> H["5. Flag Global Crash Handler (quiet shutdown mode)"]
+    H --> I["6. Accept Event and Delegate to super().closeEvent(event)"]
+```
+
+1. **Prompt first**: Before changing any application state or stopping workers, check for unsaved work and prompt the user. If the user clicks **Cancel**, ignore the event (`event.ignore()`) and return immediately.
+2. **Set closing flag (`self._is_closing = True`)**: Prevent any pending UI refresh callbacks, window title updates, or resize/focus events from running logic that expects a fully intact window.
+3. **Stop background workers**: Signal worker loops to terminate and `wait()` for thread completion so background threads cannot emit signals or touch shared data while objects are being dismantled.
+4. **Disconnect signals**: Explicitly disconnect signals from child/auxiliary objects (like `undo_stack.cleanChanged` or worker signals) so that destructor-triggered emissions cannot execute callbacks.
+5. **Set quiet shutdown flag**: Inform the global crash/exception handler (`crash_handler.set_shutting_down(True)`) that any late-breaking or teardown errors should be logged to disk/stderr without presenting blocking modal error dialogs to a user who already chose to exit.
+6. **Delegate to base class**: Call `super().closeEvent(event)` and `event.accept()`.
+
+---
+
+### Practice Exercises
+
+#### Exercise 1: Spot the Shutdown Bug
+**Question**: Examine the following 15-line PySide6 snippet. What critical bug will occur when the user closes the window, and why?
+
+```python
+class TextEditor(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.doc = QTextDocument(self)
+        self.stack = QUndoStack(self)
+        self.stack.cleanChanged.connect(self.update_title)
+
+    def update_title(self, is_clean):
+        self.setWindowTitle("Editor" if self.stack.isClean() else "Editor *")
+
+    def closeEvent(self, event):
+        if not self.stack.isClean() and self.prompt_save() == QMessageBox.Cancel:
+            event.ignore()
+            return
+        event.accept()
+```
+
+**Solution**:
+1. When `closeEvent` finishes and the window is destroyed, Qt destroys the child `QUndoStack` (`self.stack`).
+2. As `QUndoStack` is destroyed, clearing uncommitted commands triggers the `cleanChanged` signal.
+3. The connected slot `self.update_title` is invoked during destruction.
+4. `update_title` calls `self.stack.isClean()`. However, the C++ `QUndoStack` is already being destroyed, causing Shiboken to throw `RuntimeError: libshiboken: Internal C++ object (PySide6.QtGui.QUndoStack) already deleted.`
+5. **Fix**: In `closeEvent`, disconnect the signal (`self.stack.cleanChanged.disconnect()`) and/or set an `_is_closing = True` guard before allowing destruction.
+
+---
+
+#### Exercise 2: Design Cleanup Sequence for Camera Feed Thread & Undo Stack
+**Question**: You are designing a video annotation application. The window owns:
+- A `CameraWorker` running on a separate `QThread`, emitting `frameReady(QImage)` at 60 FPS to `VideoWidget`.
+- A `QUndoStack` tracking bounding-box annotations, with `cleanChanged` updating an asterisk in the title.
+- A recording file that must be cleanly finalized if recording is active.
+
+Design the step-by-step cleanup sequence inside `MainWindow.closeEvent(event)`.
+
+**Solution**:
+1. **Unsaved / Active Work Check**:
+   - If recording is active or `not undo_stack.isClean()`, prompt the user (Save / Discard / Cancel).
+   - If user chooses **Cancel**, call `event.ignore()` and return immediately.
+2. **Closing Sentinel**:
+   - Set `self._is_closing = True` so no paint/resize/title updates proceed.
+3. **Thread Teardown**:
+   - Disconnect `camera_worker.frameReady` from `video_widget.update_frame` to prevent incoming frame signals from queueing.
+   - Request worker termination (`camera_worker.stop()`, `camera_thread.quit()`).
+   - Block cleanly until worker finishes (`camera_thread.wait(3000)`), ensuring the recording file or hardware device is safely closed.
+4. **Signal Severing**:
+   - Disconnect `undo_stack.cleanChanged`.
+5. **Quiet Exception Handling**:
+   - Mark application state as shutting down to suppress modal crash dialogs during teardown.
+6. **Pass to Base**:
+   - Call `super().closeEvent(event)` and `event.accept()`.

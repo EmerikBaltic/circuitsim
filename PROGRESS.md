@@ -14,7 +14,25 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done (244 Passing Tests)
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done (247 Passing Tests)
+
+## Startup & Shutdown Bug Fixes (Items 1–6)
+- **Bug (a) Empty Start Canvas**:
+  - *Origin*: In `src/circuitsim/main.py` lines 106–111 inside `run_gui()`, hardcoded placement calls (`scene.place_new_component(...)`) created a 5-component demo circuit (`dc_voltage`, `switch`, `resistor`, `lightbulb`, `ground`) on every launch.
+  - *Commit Origin*: Commit `06c2d72` ("Milestone 2 Step 2A: main window, IEC symbol loader/preview, palette, and schematic canvas").
+  - *Root Cause*: Placing components via `place_new_component` pushed commands onto `scene.undo_stack`, making `undo_stack.isClean() == False`, marking the document modified with an asterisk (`*`) in the title bar, and triggering the "save changes?" prompt whenever the user closed a fresh app without touching anything.
+  - *Fix*: Removed the hardcoded startup placement in `src/circuitsim/main.py`. Canvas now starts completely empty, undo stack is clean, title has no asterisk, and closing immediately exits without prompting.
+  - *Test Impact*: 0 existing tests depended on startup components (all existing tests construct their own isolated circuits). Added new offscreen Qt test `test_fresh_window_starts_empty_and_clean_with_no_close_prompt` in `tests/test_circ_io.py`.
+
+- **Bug (b) Shutdown Exception (libshiboken C++ object already deleted)**:
+  - *Origin & Cause*: In `MainWindow.__init__`, `self.circuit_scene.undo_stack.cleanChanged` was connected to `lambda _clean: self._update_window_title()`. When closing the application after selecting "Discard", Qt destroys child objects during teardown. When `CircuitScene` destroys its child `QUndoStack`, the C++ destructor `QUndoStack::~QUndoStack()` cleans uncommitted commands, emitting `cleanChanged(bool)`. The connected slot invoked `self._update_window_title()` -> `has_unsaved_changes()` -> `self.circuit_scene.undo_stack.isClean()`. Because the underlying C++ `QUndoStack` was already partially destroyed, Shiboken raised `RuntimeError: libshiboken: Internal C++ object (PySide6.QtGui.QUndoStack) already deleted.`. The global unhandled exception hook (`crash_handler._excepthook`) then displayed a modal critical error dialog during application exit.
+  - *Fix*:
+    1. Reordered shutdown sequence in `MainWindow.closeEvent`: prompt for unsaved changes first; if cancelled, ignore event; if discarded/saved, set `self._is_closing = True`.
+    2. Stop and wait for the background simulation worker thread (`self.sim_controller.shutdown()`).
+    3. Explicitly disconnect `self.circuit_scene.undo_stack.cleanChanged` and worker signals before widget teardown.
+    4. Guard `_update_window_title()` and `has_unsaved_changes()` with `if self._is_closing: return`.
+    5. Set `set_shutting_down(True)` in `crash_handler` to suppress modal `QMessageBox` popups during shutdown while still logging any shutdown exceptions to `crash.log` and stderr.
+  - *Tests*: Added `test_window_shutdown_cleanliness_all_cases` (verifying all 8 shutdown scenarios: discard, save, cancel, clean start, running simulation, loaded file, new with discard, rapid double close) and `test_quiet_shutdown_error_logging_without_dialog`.
 
 ### What Is Done
 - **Environment, Licensing & Editable Package Installation**:
