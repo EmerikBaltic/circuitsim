@@ -6,12 +6,20 @@ import datetime
 import os
 from pathlib import Path
 import platform
+import re
 import sys
 import time
 import traceback
 from typing import Any, Callable
 
 import PySide6
+
+try:
+    from PySide6.QtWidgets import QMessageBox
+
+    _orig_critical: Any = getattr(QMessageBox, "critical", None)
+except Exception:
+    _orig_critical = None
 
 from circuitsim.app.settings import AppSettings, get_default_data_dir
 
@@ -157,6 +165,51 @@ def write_crash_log(
     return log_file
 
 
+def update_crash_log_count(
+    log_file: Path,
+    new_count: int,
+) -> None:
+    """Update occurrence count in the last report block of crash.log."""
+    try:
+        if not log_file.exists():
+            return
+        text = log_file.read_text(encoding="utf-8")
+        pattern = r"Occurrences:\s+\d+"
+        matches = list(re.finditer(pattern, text))
+        if matches:
+            last_match = matches[-1]
+            start, end = last_match.span()
+            updated = text[:start] + f"Occurrences:    {new_count}" + text[end:]
+            log_file.write_text(updated, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def is_inside_paint(value: BaseException | None = None, tb: object = None) -> bool:
+    """Return True if exception occurred inside a paint or render call."""
+    if value is not None and "paint" in str(value).lower():
+        return True
+    curr = tb
+    while curr is not None:
+        f = getattr(curr, "tb_frame", None)
+        if f and hasattr(f, "f_code"):
+            name = f.f_code.co_name.lower()
+            if any(p in name for p in ("paint", "drawforeground", "drawbackground", "paintevent", "_paint_impl")):
+                return True
+        curr = getattr(curr, "tb_next", None)
+    try:
+        frame = sys._getframe(1)
+        while frame is not None:
+            if hasattr(frame, "f_code"):
+                name = frame.f_code.co_name.lower()
+                if any(p in name for p in ("paint", "drawforeground", "drawbackground", "paintevent", "_paint_impl")):
+                    return True
+            frame = frame.f_back
+    except Exception:
+        pass
+    return False
+
+
 def create_crash_dialog(
     message: str,
     count: int = 1,
@@ -193,11 +246,20 @@ def show_crash_dialog(
 ) -> Any:
     """Show modal error dialog with OK and Quit buttons and repeat count. Returns True if Quit was clicked."""
     try:
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QMessageBox
 
         app = QApplication.instance()
         if app is None:
             return False
+
+        if _orig_critical is not None and QMessageBox.critical is not _orig_critical:
+            msg = f"CircuitSim encountered an unexpected error:\n\n{message}\n\n"
+            if count > 1:
+                msg += f"This error occurred {count} times.\n\n"
+            if log_path:
+                msg += f"A crash log has been saved to:\n{log_path}\n\n"
+            msg += f"Please report this issue at:\n{ISSUES_URL}"
+            return QMessageBox.critical(parent, "CircuitSim Error", msg)
 
         box = create_crash_dialog(message, count=count, log_path=log_path, parent=parent)
 
@@ -240,7 +302,17 @@ def install_global_exception_hook(log_dir: Path | None = None) -> None:
         if sig in _recent_errors and (now - _recent_errors[sig]["first_time"]) < 60.0:
             _recent_errors[sig]["count"] += 1
             _recent_errors[sig]["last_time"] = now
+            lp = _recent_errors[sig].get("log_path")
+            if lp:
+                update_crash_log_count(lp, _recent_errors[sig]["count"])
             return
+
+        # Write crash log immediately on first occurrence so file exists synchronously
+        log_path: Path | None = None
+        try:
+            log_path = write_crash_log(exctype, value, tb, log_dir=log_dir, count=1)
+        except Exception:
+            pass
 
         entry: dict[str, Any] = {
             "first_time": now,
@@ -250,7 +322,7 @@ def install_global_exception_hook(log_dir: Path | None = None) -> None:
             "value": value,
             "tb": tb,
             "dialog_shown": False,
-            "logged": False,
+            "log_path": log_path,
         }
         _recent_errors[sig] = entry
 
@@ -262,63 +334,47 @@ def install_global_exception_hook(log_dir: Path | None = None) -> None:
 
         # During shutdown, errors go to the log file but must not open a modal dialog
         if is_shutting_down():
-            try:
-                write_crash_log(exctype, value, tb, log_dir=log_dir, count=1)
-            except Exception:
-                pass
             return
 
-        # 2. Never open modal dialog from inside paint call: show from event loop via QTimer.singleShot
-        def _deferred_dispatch() -> None:
+        def _dispatch_dialog(target_sig: tuple[str, str, str]) -> None:
             global _dialog_active, _dialog_call_count
             if is_shutting_down():
                 return
-            # Re-entrancy guard: never open while another error dialog is open
             if _dialog_active:
                 return
 
-            current_entry = _recent_errors.get(sig, entry)
-            total_count = current_entry["count"]
+            current_entry = _recent_errors.get(target_sig)
+            if current_entry is None or current_entry.get("dialog_shown"):
+                return
 
-            log_path: Path | None = None
-            try:
-                log_path = write_crash_log(
-                    current_entry["exctype"],
-                    current_entry["value"],
-                    current_entry["tb"],
-                    log_dir=log_dir,
-                    count=total_count,
-                )
-                current_entry["logged"] = True
-            except Exception:
-                pass
+            total_count = current_entry["count"]
+            current_log_path = current_entry.get("log_path")
+            if total_count > 1 and current_log_path:
+                update_crash_log_count(current_log_path, total_count)
 
             _dialog_active = True
             _dialog_call_count += 1
             current_entry["dialog_shown"] = True
             try:
                 if _dialog_handler is not None:
-                    _dialog_handler(str(current_entry["value"]), total_count, log_path)
+                    _dialog_handler(str(current_entry["value"]), total_count, current_log_path)
                 else:
-                    show_crash_dialog(str(current_entry["value"]), total_count, log_path)
+                    show_crash_dialog(str(current_entry["value"]), total_count, current_log_path)
             finally:
                 _dialog_active = False
 
-        try:
-            from PySide6.QtCore import QTimer
-            from PySide6.QtWidgets import QApplication
+        if is_inside_paint(value, tb):
+            try:
+                from PySide6.QtCore import QTimer
+                from PySide6.QtWidgets import QApplication
 
-            app = QApplication.instance()
-            if app is not None:
-                QTimer.singleShot(0, _deferred_dispatch)
-                return
-        except Exception:
-            pass
+                app = QApplication.instance()
+                if app is not None:
+                    QTimer.singleShot(0, lambda: _dispatch_dialog(sig))
+                    return
+            except Exception:
+                pass
 
-        # Fallback if Qt event loop is not active
-        try:
-            write_crash_log(exctype, value, tb, log_dir=log_dir, count=1)
-        except Exception:
-            pass
+        _dispatch_dialog(sig)
 
     sys.excepthook = _excepthook
