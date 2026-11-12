@@ -1146,6 +1146,12 @@ class MainWindow(QMainWindow):
 
         # 2. Mark window as closing
         self._is_closing = True
+        try:
+            from circuitsim.app.crash_handler import set_shutting_down
+
+            set_shutting_down(True)
+        except Exception:
+            pass
 
         # 3. Stop the simulation worker thread and wait for it
         self.sim_controller.shutdown()

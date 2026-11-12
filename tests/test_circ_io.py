@@ -782,4 +782,62 @@ print("ITEM2_OK")
     ), f"Shutdown exceptions captured in log file:\n{err_file.read_text(encoding='utf-8') if err_file.exists() else ''}"
 
 
+def test_quiet_shutdown_error_logging_without_dialog(tmp_path: Path) -> None:
+    """Item 5: Global exception hook writes to log file during shutdown without modal dialog,
+
+    while normal runtime errors show the dialog.
+    """
+    tmp_path_str = str(tmp_path).replace("\\", "/")
+    script = f"""
+import sys, os, tempfile
+from pathlib import Path
+from PySide6.QtWidgets import QApplication, QMessageBox
+import circuitsim.app.crash_handler as ch
+
+app = QApplication.instance() or QApplication(sys.argv)
+log_dir = Path(r"{tmp_path_str}")
+ch.install_global_exception_hook(log_dir=log_dir)
+
+dialogs_shown = []
+def mock_critical(parent, title, msg):
+    dialogs_shown.append((title, msg))
+
+QMessageBox.critical = mock_critical
+os.environ["QT_QPA_PLATFORM"] = "normal_test"
+
+# 1. Normal runtime error: must show dialog AND write to log
+ch.set_shutting_down(False)
+try:
+    raise ValueError("Runtime error while app is running")
+except ValueError as exc:
+    sys.excepthook(type(exc), exc, exc.__traceback__)
+
+log_file = log_dir / "crash.log"
+assert log_file.exists(), "crash.log must exist after runtime error"
+content1 = log_file.read_text(encoding="utf-8")
+assert "Runtime error while app is running" in content1
+assert len(dialogs_shown) == 1, f"Expected 1 dialog during runtime error, got {{len(dialogs_shown)}}"
+assert "CircuitSim Error" in dialogs_shown[0][0]
+
+# 2. Error during shutdown: must write to log but NOT show dialog
+dialogs_shown.clear()
+ch.set_shutting_down(True)
+try:
+    raise RuntimeError("Shutdown teardown error during quitting")
+except RuntimeError as exc:
+    sys.excepthook(type(exc), exc, exc.__traceback__)
+
+content2 = log_file.read_text(encoding="utf-8")
+assert "Shutdown teardown error during quitting" in content2
+assert len(dialogs_shown) == 0, f"Expected 0 dialogs during shutdown, got {{len(dialogs_shown)}}"
+
+ch.set_shutting_down(False)
+print("ITEM5_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "ITEM5_OK" in res.stdout
+
+
+
 

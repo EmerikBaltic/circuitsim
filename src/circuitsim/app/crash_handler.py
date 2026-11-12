@@ -11,10 +11,33 @@ import traceback
 
 import PySide6
 
-from circuitsim.app.settings import AppSettings
+from circuitsim.app.settings import AppSettings, get_default_data_dir
 
 REPO_URL: str = "https://github.com/EmerikBaltic/circuitsim"
 ISSUES_URL: str = "https://github.com/EmerikBaltic/circuitsim/issues"
+
+_shutting_down: bool = False
+
+
+def set_shutting_down(shutting_down: bool = True) -> None:
+    """Mark whether application shutdown is in progress."""
+    global _shutting_down
+    _shutting_down = shutting_down
+
+
+def is_shutting_down() -> bool:
+    """Return True if application is in the process of shutting down."""
+    if _shutting_down:
+        return True
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None and app.closingDown():
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def get_app_version() -> str:
@@ -68,8 +91,8 @@ def write_crash_log(
     tb: object,
     log_dir: Path | None = None,
 ) -> Path:
-    """Write crash report to crash.log in log_dir (defaulting to AppSettings.default_data_dir())."""
-    target_dir = log_dir or AppSettings.default_data_dir()
+    """Write crash report to crash.log in log_dir (defaulting to get_default_data_dir())."""
+    target_dir = log_dir or get_default_data_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
     log_file = target_dir / "crash.log"
     report = format_crash_report(exctype, value, tb)
@@ -102,6 +125,10 @@ def install_global_exception_hook(log_dir: Path | None = None) -> None:
             traceback.print_exception(exctype, value, tb)
         except Exception:
             pass
+
+        # During shutdown, errors go to the log file but must not open a modal dialog
+        if is_shutting_down():
+            return
 
         # Show friendly dialog if interactive Qt application is running
         try:
