@@ -688,26 +688,74 @@ class ComponentItem(QGraphicsObject):
 
     def boundingRect(self) -> QRectF:
         """Return tight bounding rectangle enclosing the rotated symbol body, terminals, and upright labels."""
-        rect = self.shape().boundingRect()
+        w_px, h_px = self.metadata.pixel_size
+        t = QTransform()
+        if self.flipped_h:
+            t.scale(-1.0, 1.0)
+        if self.rotation_deg:
+            t.rotate(float(self.rotation_deg))
+        body = QRectF(-w_px / 2.0 - 4.0, -h_px / 2.0 - 4.0, w_px + 8.0, h_px + 8.0)
+        rect = t.mapRect(body)
+
+        for term in self.metadata.terminals:
+            tx, ty = transform_terminal_position(
+                term.grid_pos,
+                (0.0, 0.0),
+                rotation_deg=self.rotation_deg,
+                flipped_h=self.flipped_h,
+                grid_px=GRID_PITCH_PX,
+            )
+            rect = rect.united(QRectF(tx - 6.0, ty - 6.0, 12.0, 12.0))
 
         if not self.is_ghost:
-            lbl_rect, val_rect, _ = self._upright_label_and_value_rects()
-            rect = rect.united(lbl_rect)
+            lbl_rect, val_rect, text_align = self._upright_label_and_value_rects()
+            font = QFont("Segoe UI", 8)
+            font.setBold(True)
+            fm = QFontMetrics(font)
+
+            lbl_text = self.component.label or ""
+            if lbl_text.strip():
+                l_box = fm.boundingRect(lbl_rect.toRect(), int(text_align), lbl_text)
+                rect = rect.united(QRectF(l_box).adjusted(-2.0, -1.0, 2.0, 1.0))
+
             if (
                 self.component.show_value
                 and self.component.component_type != "ground"
             ):
-                rect = rect.united(val_rect)
-            if self.diagnostic_severity in ("error", "warning") or (
+                val_text = (
+                    self.live_display_value
+                    if self.live_display_value is not None
+                    else format_component_value_summary(self.component)
+                )
+                if val_text and val_text.strip():
+                    font_v = QFont("Segoe UI", 8)
+                    font_v.setBold(isinstance(self.component, (Voltmeter, Ammeter)))
+                    fm_v = QFontMetrics(font_v)
+                    v_box = fm_v.boundingRect(val_rect.toRect(), int(text_align), val_text)
+                    rect = rect.united(QRectF(v_box).adjusted(-3.0, -1.0, 3.0, 1.0))
+
+            if self.component.component_type == "led" and (self.isSelected() or self._is_hovered):
+                marks = led_marks(self.rotation_deg, self.flipped_h, (0.0, 0.0))
+                ax, ay = marks["anode_tag"]
+                kx, ky = marks["cathode_tag"]
+                rect = rect.united(QRectF(ax - 8.0, ay - 6.0, 16.0, 12.0))
+                rect = rect.united(QRectF(kx - 8.0, ky - 6.0, 16.0, 12.0))
+
+            is_over_bulb = (
                 isinstance(self.component, Lightbulb)
                 and self.component.is_over_bright
-            ):
+            )
+            is_over_led = (
+                self.component.component_type == "led"
+                and getattr(self.component, "is_over_current", False)
+            )
+            if self.diagnostic_severity in ("error", "warning") or is_over_bulb or is_over_led:
                 rect = rect.united(QRectF(11.0, -25.0, 14.0, 14.0))
 
-        if isinstance(self.component, Lightbulb) and not self.is_ghost:
+        if isinstance(self.component, Lightbulb) and not self.is_ghost and getattr(self.component, "brightness", 0.0) > 0.0:
             rect = rect.united(QRectF(-36.0, -36.0, 72.0, 72.0))
 
-        return rect.adjusted(-4.0, -4.0, 4.0, 4.0)
+        return rect
 
     def itemChange(
         self,
@@ -908,11 +956,13 @@ class ComponentItem(QGraphicsObject):
             painter.setFont(font)
             fm = painter.fontMetrics()
 
-            # Background plate for name label so intersecting wires never cut through text
-            lbl_box = fm.boundingRect(lbl_rect.toRect(), int(text_align), self.component.label)
-            painter.fillRect(QRectF(lbl_box).adjusted(-2.0, -1.0, 2.0, 1.0), QColor(palette.canvas_bg))
-            painter.setPen(QColor(palette.symbol_text))
-            painter.drawText(lbl_rect, text_align, self.component.label)
+            # Background plate for name label so intersecting wires never cut through text (only if label exists)
+            lbl_text = self.component.label or ""
+            if lbl_text.strip():
+                lbl_box = fm.boundingRect(lbl_rect.toRect(), int(text_align), lbl_text)
+                painter.fillRect(QRectF(lbl_box).adjusted(-2.0, -1.0, 2.0, 1.0), QColor(palette.canvas_bg))
+                painter.setPen(QColor(palette.symbol_text))
+                painter.drawText(lbl_rect, text_align, lbl_text)
 
             if (
                 self.component.show_value
@@ -926,10 +976,11 @@ class ComponentItem(QGraphicsObject):
                     if self.live_display_value is not None
                     else format_component_value_summary(self.component)
                 )
-                # Background plate for value readout so intersecting wires never cut through text
-                val_box = fm_val.boundingRect(val_rect.toRect(), int(text_align), val_text)
-                painter.fillRect(QRectF(val_box).adjusted(-3.0, -1.0, 3.0, 1.0), QColor(palette.canvas_bg))
-                painter.drawText(val_rect, text_align, val_text)
+                if val_text and val_text.strip():
+                    # Background plate for value readout so intersecting wires never cut through text
+                    val_box = fm_val.boundingRect(val_rect.toRect(), int(text_align), val_text)
+                    painter.fillRect(QRectF(val_box).adjusted(-3.0, -1.0, 3.0, 1.0), QColor(palette.canvas_bg))
+                    painter.drawText(val_rect, text_align, val_text)
 
             # Over-bright, over-current, or problem badge in upright coordinates
             is_over_bulb = (
