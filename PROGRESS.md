@@ -14,7 +14,7 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle Complete, Paint Safety & Crash Handler Hardening Complete
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle Complete, Paint Safety & Crash Handler Hardening Complete (277 Passing Tests)
 
 ## Theme Palette Completeness, Crash Handler Protection & Paint Safety (Items 1–7)
 - **Item 1: Reproduction Test**:
@@ -269,6 +269,6 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (272 tests)
+# Run the full test suite (277 tests)
 .\.venv\Scripts\pytest.exe
 ```

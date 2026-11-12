@@ -353,3 +353,108 @@ Design the step-by-step cleanup sequence inside `MainWindow.closeEvent(event)`.
    - Mark application state as shutting down to suppress modal crash dialogs during teardown.
 6. **Pass to Base**:
    - Call `super().closeEvent(event)` and `event.accept()`.
+
+---
+
+## Paint Safety, Virtual Overrides & The Recursive Error Dialog Trap
+
+### 1. The Trap: Why One Failing `paint()` Can Flood the Screen
+
+In a GUI framework like Qt (PySide6), the graphics rendering pipeline is driven by continuous paint events. Whenever a window opens, moves, resizes, or uncovers another widget, Qt calls `paint()` on every visible item in the scene. In an interactive 60 FPS canvas, `paint()` can be called dozens or hundreds of times per second.
+
+When Python code overrides a C++ virtual method like `QGraphicsItem.paint(painter, option, widget)`, any unhandled Python exception (such as `AttributeError: 'ThemePalette' object has no attribute 'symbol_label'`) travels across the Python-to-C++ boundary. Shiboken (PySide6's binding layer) catches the error and forwards it to `sys.excepthook`.
+
+If `sys.excepthook` responds by immediately popping up a modal dialog:
+```python
+# DANGEROUS: Calling modal dialog synchronously inside sys.excepthook
+QMessageBox.critical(None, "Error", str(exc))
+```
+A disastrous feedback loop occurs:
+1. `paint()` raises an exception.
+2. `sys.excepthook` opens a modal `QMessageBox`.
+3. Creating and showing the modal dialog forces Qt to redraw the window behind it.
+4. Redrawing the window calls `paint()` again on the broken item.
+5. `paint()` raises the exact same exception again.
+6. `sys.excepthook` opens *another* `QMessageBox` on top of the first.
+7. Step 4 repeats indefinitely!
+
+Within a fraction of a second, thousands of modal dialogs cascade across the desktop, exhausting window handles, flooding the crash log, and completely preventing the user from dismissing the dialogs or closing the application.
+
+---
+
+### 2. The Solution: Three Lines of Defense
+
+To make rendering bulletproof, modern desktop applications employ three complementary safety mechanisms:
+
+#### Defense Layer 1: The Paint Safety Guard (Item Level)
+Never allow an exception to escape a virtual `paint()` override into Qt's C++ rendering engine. Wrap the inner drawing code in a `try...except` block:
+- Catch any unexpected exception.
+- Log the failure **once per item** (using an `_error_logged` flag so subsequent frames do not flood the log).
+- Draw a visible fallback placeholder in its place (e.g., a red dashed bounding rectangle with a bold `"!"` mark).
+- Return cleanly so Qt's scene traversal can continue rendering other components.
+
+#### Defense Layer 2: Signature Deduplication & Rate Limiting (Handler Level)
+In the global `sys.excepthook`, deduplicate incoming exceptions by a signature tuple:
+$$\text{signature} = (\text{exception\_type}, \text{message}, \text{top\_stack\_frame})$$
+- If the same error signature repeats within a 60-second window, **suppress** repeated dialogs and simply increment a counter.
+- When written to disk, output the consolidated repeat count (`Occurrences: 1000`).
+
+#### Defense Layer 3: Event Loop Deferral & Re-Entrancy Guard (Window Level)
+Never show a modal dialog synchronously from within the exception hook:
+- Use `QTimer.singleShot(0, callback)` to defer dialog creation until the current call stack unwinds and control returns to Qt's event loop.
+- Use an atomic boolean re-entrancy flag (`_dialog_active`). If a modal error dialog is already open on screen, subsequent notifications are ignored until the user closes the existing dialog.
+- Always provide a dedicated **"Quit"** button next to OK so the user can cleanly exit the application even if the program state is damaged.
+
+---
+
+### Practice Exercises
+
+#### Exercise 1: Tracing Paint Recursion
+**Question**: Suppose a custom `MeterItem` raises a `KeyError` inside its `paint()` method. The application has installed an unthrottled exception hook that opens `QMessageBox.critical(parent, ...)`. Explain step-by-step why the user cannot click the "OK" button on the dialog to make it disappear.
+
+**Solution**:
+1. When the user attempts to click "OK", the mouse press or hover event requires Qt to repaint the button and update widget geometry.
+2. Redrawing any portion of the desktop scene or parent window triggers a damage/expose event on `MeterItem`.
+3. `MeterItem.paint()` is invoked again and immediately raises `KeyError`.
+4. The unthrottled exception hook creates a *new* modal dialog on top of the existing one before the user's click event on the first dialog can finish processing.
+5. Every click or keypress causes another repaint, spawning new dialogs faster than the user can click.
+
+---
+
+#### Exercise 2: Implementing Fallback Rendering in PySide6
+**Question**: Write a Python function `safe_paint_wrapper(item, painter, draw_func)` that executes `draw_func(painter)` safely. If `draw_func` raises any exception, it must log the exception only on its first occurrence on `item` and draw a red dashed rectangle enclosing `item.boundingRect()` with `"!"` centered inside, without letting the exception escape.
+
+**Solution**:
+```python
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+
+def safe_paint_wrapper(item, painter: QPainter, draw_func) -> None:
+    try:
+        draw_func(painter)
+    except Exception as exc:
+        # 1. Log once per item
+        if not getattr(item, "_paint_failed", False):
+            item._paint_failed = True
+            print(f"Paint error in {item}: {exc}")
+
+        # 2. Draw fallback red dashed rectangle with '!'
+        try:
+            painter.save()
+            red = QColor("#FF5252")
+            pen = QPen(red, 2.0, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(QColor(255, 82, 82, 35)))
+            rect = item.boundingRect()
+            painter.drawRoundedRect(rect, 4.0, 4.0)
+
+            font = QFont("Segoe UI", 12)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(red)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "!")
+            painter.restore()
+        except Exception:
+            pass  # Ensure nothing escapes under any circumstance
+```
+
