@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         self._last_error_reason: str = ""
         self._current_path: Path | None = None
         self._switch_modified: bool = False
+        self._is_closing: bool = False
 
         self._build_menus_and_toolbars()
         self._build_docks()
@@ -601,11 +602,15 @@ class MainWindow(QMainWindow):
 
     def _update_window_title(self) -> None:
         """Show '<file name>*' (asterisk = unsaved changes) in the title bar."""
+        if self._is_closing:
+            return
         name = self._current_path.name if self._current_path else "Untitled"
         star = "*" if self.has_unsaved_changes() else ""
         self.setWindowTitle(f"{name}{star} — CircuitSim")
 
     def has_unsaved_changes(self) -> bool:
+        if self._is_closing:
+            return False
         return not self.circuit_scene.undo_stack.isClean() or self._switch_modified
 
     def _show_error(self, title: str, text: str) -> None:
@@ -1121,9 +1126,39 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Ask about unsaved changes, then stop the simulation worker thread cleanly."""
+        """Orderly window shutdown sequence:
+
+        1. If already closing, accept immediately.
+        2. Ask about unsaved changes first; if the user cancels, change nothing.
+        3. Mark window as closing so handlers never touch the undo stack.
+        4. Stop the simulation worker thread and wait for it.
+        5. Disconnect listeners from the undo stack and worker before destruction.
+        6. Proceed with base window close.
+        """
+        if self._is_closing:
+            event.accept()
+            return
+
+        # 1. Ask about unsaved changes first; if user cancels, change nothing
         if not self._confirm_discard_changes("closing the window"):
             event.ignore()
             return
+
+        # 2. Mark window as closing
+        self._is_closing = True
+
+        # 3. Stop the simulation worker thread and wait for it
         self.sim_controller.shutdown()
+
+        # 4. Disconnect handlers from the undo stack and worker before destruction
+        try:
+            self.circuit_scene.undo_stack.cleanChanged.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+
+        try:
+            self.sim_controller.frame_ready.disconnect(self._on_simulation_frame)
+        except (RuntimeError, TypeError):
+            pass
+
         super().closeEvent(event)
