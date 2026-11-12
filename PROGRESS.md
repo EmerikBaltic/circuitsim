@@ -14,7 +14,28 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle & Problems Panel Complete (272 Passing Tests)
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle Complete, Paint Safety & Crash Handler Hardening Complete
+
+## Theme Palette Completeness, Crash Handler Protection & Paint Safety (Items 1–7)
+- **Item 1: Reproduction Test**:
+  - Added offscreen Qt reproduction test (`test_reproduce_led_paint_palette_attribute_error`) verifying that selecting and hovering an LED on canvas in dark and light themes exercises terminal tags and captures the missing `symbol_label` attribute error in both themes.
+- **Item 2: ThemePalette Completeness**:
+  - Added missing `symbol_label` color token to `ThemePalette` definition (`#8B949E` in `DARK_PALETTE`, `#57606A` in `LIGHT_PALETTE`).
+  - Added AST-based static/dynamic test `test_every_palette_attribute_in_code_exists_in_both_themes` guaranteeing that all color tokens accessed on `palette` across the codebase exist in both dark and light palettes.
+- **Item 3: Exhaustive Smoke Test**:
+  - Smoke test (`test_smoke_render_every_palette_entry_all_orientations_states_and_themes`) covering all 12 palette entries across all 8 orientations, selected/unselected, hovered/unhovered, running/stopped (with all 6 LED states: off, dim, on, over, burned, reverse) across both dark and light themes (1,792 permutations in ~2.3s) with 0 exceptions reaching the exception hook.
+- **Item 4: Crash Handler Loop Prevention & Modal Safety**:
+  - Signature-based error deduplication `(exception_type, message, top_frame)` with 60-second throttling window.
+  - Re-entrancy guard preventing duplicate or nested modal dialogs.
+  - Deferred dialog execution via `QTimer.singleShot(0, ...)` ensuring errors in `paint()` never open modal event loops during a paint traversal.
+  - Added "Quit" button to error dialog and report repeat counts (`Occurrences: N`).
+- **Item 5: Paint Safety Fallback**:
+  - Wrapped `ComponentItem.paint()`, `WireItem.paint()`, `JunctionItem.paint()`, and `CircuitScene.drawForeground()` in safety guards.
+  - Caught drawing exceptions are logged once per item and replaced with a red dashed bounding rectangle with a bold "!" indicator.
+  - Guarantees nothing ever propagates out of a virtual `paint()` override to cause C++ Shiboken aborts or paint loops.
+- **Item 6: File Storage Location & Directory Naming Investigation**:
+  - *Report*: Settings, recent files, and `crash.log` are stored under `get_default_data_dir()`. On Windows, this resolves to `C:\Users\emeri\AppData\Roaming\python` (`settings.json` and `crash.log`).
+  - *Why the folder is named "python"*: `QStandardPaths.writableLocation(AppDataLocation)` checks `QCoreApplication.applicationName()`. Because neither `QCoreApplication.setApplicationName("CircuitSim")` nor `QCoreApplication.setOrganizationName("Ohmbench")` is set during initialization in `main.py`, Qt falls back to the running binary name `sys.executable` (`python.exe` -> `"python"`). No working code was modified; the upcoming rename task will set the organization and application names.
 
 ## LED Component & Problems Panel (Items 1–6)
 - **Item 1: LED Symbol and Palette**:
