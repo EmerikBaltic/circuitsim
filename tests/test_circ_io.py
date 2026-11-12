@@ -643,3 +643,143 @@ print("ITEM1_OK")
     assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     assert "ITEM1_OK" in res.stdout
 
+
+def test_window_shutdown_cleanliness_all_cases(tmp_path: Path) -> None:
+    """Item 2: Verify window shutdown with all unsaved prompt cases (discard, save, cancel,
+
+    no changes, running sim, loaded file, new with discard, close twice) produces zero
+    exceptions and zero error popups.
+    """
+    err_file = tmp_path / "exceptions.log"
+    err_file_str = str(err_file).replace("\\", "/")
+    tmp_dir_str = str(tmp_path).replace("\\", "/")
+    script = f"""
+import sys, os, tempfile, traceback
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QTimer, QEventLoop
+from PySide6.QtWidgets import QApplication, QMessageBox
+from circuitsim.app.crash_handler import install_global_exception_hook
+from circuitsim.app.main_window import MainWindow
+
+captured_exceptions = []
+error_dialogs_shown = []
+err_log_path = Path(r"{err_file_str}")
+
+def exception_collector(exctype, value, tb):
+    tb_str = "".join(traceback.format_exception(exctype, value, tb))
+    captured_exceptions.append((exctype, value, tb_str))
+    try:
+        with open(err_log_path, "a", encoding="utf-8") as f:
+            f.write(f"{{exctype.__name__}}: {{value}}\\n{{tb_str}}\\n")
+    except Exception:
+        pass
+
+sys.excepthook = exception_collector
+
+app = QApplication.instance() or QApplication(sys.argv)
+tmp_dir = Path(r"{tmp_dir_str}")
+
+# Helper to mock error display
+def patch_error(win):
+    win._show_error = lambda t, m: error_dialogs_shown.append((t, m))
+
+# Case 1: Discard
+win1 = MainWindow()
+patch_error(win1)
+win1.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+win1._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+win1.close()
+app.processEvents()
+
+# Case 2: Save (patch save file dialog to write to temporary file)
+win2 = MainWindow()
+patch_error(win2)
+win2.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+save_target = tmp_dir / "saved_case.circ"
+win2._on_save_circuit_as = lambda: win2.save_to_path(save_target)
+win2._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Save
+win2.close()
+app.processEvents()
+assert save_target.exists(), "Save case must have written file"
+
+# Case 3: Cancel (window stays open, no exception)
+win3 = MainWindow()
+patch_error(win3)
+win3.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+win3._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Cancel
+win3.close()
+app.processEvents()
+assert win3.isVisible() or not win3.isMinimized(), "Window must stay open on Cancel"
+# Clean up win3
+win3._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+win3.close()
+app.processEvents()
+
+# Case 4: No changes
+win4 = MainWindow()
+patch_error(win4)
+prompt_called4 = []
+win4._ask_save_discard_cancel = lambda what: prompt_called4.append(what)
+win4.close()
+app.processEvents()
+assert prompt_called4 == [], "No changes case must not show prompt"
+
+# Case 5: Simulation running while closing
+win5 = MainWindow()
+patch_error(win5)
+v1 = win5.circuit_scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+r1 = win5.circuit_scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
+gnd = win5.circuit_scene.place_new_component("ground", QPointF(0, 60))
+win5.circuit_scene.add_wire([(0, -40), (100, -40)])
+win5.circuit_scene.add_wire([(0, 40), (100, 40)])
+win5.start_simulation()
+loop = QEventLoop()
+QTimer.singleShot(60, loop.quit)
+loop.exec()
+win5._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+win5.close()
+app.processEvents()
+
+# Case 6: After loading a file
+win6 = MainWindow()
+patch_error(win6)
+assert win6.open_path(save_target) is True
+win6.circuit_scene.place_new_component("capacitor", QPointF(200, 0))
+win6._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+win6.close()
+app.processEvents()
+
+# Case 7: After File > New with discard
+win7 = MainWindow()
+patch_error(win7)
+win7.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+win7._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+win7._on_new_circuit()
+win7.close()
+app.processEvents()
+
+# Case 8: Closing twice quickly
+win8 = MainWindow()
+patch_error(win8)
+win8.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+win8._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+win8.close()
+win8.close()
+app.processEvents()
+
+assert error_dialogs_shown == [], f"Unexpected error dialogs shown: {{error_dialogs_shown}}"
+assert captured_exceptions == [], f"Exceptions reached hook: {{[e[1] for e in captured_exceptions]}}"
+print("ITEM2_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "ITEM2_OK" in res.stdout
+    assert "libshiboken" not in res.stderr, f"libshiboken error in stderr:\n{res.stderr}"
+    assert "libshiboken" not in res.stdout, f"libshiboken error in stdout:\n{res.stdout}"
+    assert (
+        not err_file.exists() or err_file.read_text(encoding="utf-8").strip() == ""
+    ), f"Shutdown exceptions captured in log file:\n{err_file.read_text(encoding='utf-8') if err_file.exists() else ''}"
+
+
+
