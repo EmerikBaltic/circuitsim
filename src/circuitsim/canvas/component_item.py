@@ -795,6 +795,46 @@ class ComponentItem(QGraphicsObject):
         option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
+        try:
+            self._paint_impl(painter, option, widget)
+        except Exception as exc:
+            self._handle_paint_error(painter, exc)
+
+    def _handle_paint_error(self, painter: QPainter, exc: Exception) -> None:
+        """Handle paint failure: log once per item and draw red dashed rectangle with '!'."""
+        if not getattr(self, "_paint_error_logged", False):
+            self._paint_error_logged = True
+            try:
+                from circuitsim.app.crash_handler import write_crash_log
+
+                write_crash_log(type(exc), exc, exc.__traceback__, count=1)
+            except Exception:
+                pass
+
+        try:
+            painter.save()
+            red_col = QColor("#FF5252")
+            pen = QPen(red_col, 2.0, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(QColor(255, 82, 82, 35)))
+            rect = self.boundingRect().adjusted(2.0, 2.0, -2.0, -2.0)
+            painter.drawRoundedRect(rect, 4.0, 4.0)
+
+            font = QFont("Segoe UI", 12)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(red_col)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "!")
+            painter.restore()
+        except Exception:
+            pass
+
+    def _paint_impl(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
         _ = (option, widget)
         palette: ThemePalette = get_theme_palette(self.theme)
         w_px, h_px = self.metadata.pixel_size

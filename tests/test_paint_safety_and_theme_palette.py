@@ -311,4 +311,98 @@ finally:
     assert proc.returncode == 0, f"Subprocess failed with code {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
 
 
+def test_paint_safety_guard_on_component_wire_and_junction() -> None:
+    """Item 5: Wrap paint() in guard: if drawing fails, log once per item, draw red dashed rect with '!', and continue without propagating."""
+    script = """
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QImage, QPainter
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.crash_handler import install_global_exception_hook, reset_crash_state
+from circuitsim.app.main_window import MainWindow
+from circuitsim.canvas.wire_item import JunctionItem, WireItem
+
+tmp_dir = Path(tempfile.mkdtemp())
+try:
+    app = QApplication.instance() or QApplication([])
+    reset_crash_state()
+    install_global_exception_hook(log_dir=tmp_dir)
+
+    win = MainWindow()
+    win.show()
+    scene = win.circuit_scene
+
+    # 1. Place component whose inner paint raises
+    comp_item = scene.place_new_component("resistor", QPointF(100.0, 100.0))
+    def failing_comp_paint(*args, **kwargs):
+        raise RuntimeError("Simulated failure in component paint")
+    comp_item._paint_impl = failing_comp_paint
+
+    # 2. Place wire whose inner paint raises
+    wire_item = WireItem("w_test", [(50.0, 50.0), (150.0, 50.0)])
+    scene.addItem(wire_item)
+    def failing_wire_paint(*args, **kwargs):
+        raise RuntimeError("Simulated failure in wire paint")
+    wire_item._paint_impl = failing_wire_paint
+
+    # 3. Place junction item whose inner paint raises
+    junc_item = JunctionItem(QPointF(200.0, 200.0))
+    scene.addItem(junc_item)
+    def failing_junc_paint(*args, **kwargs):
+        raise RuntimeError("Simulated failure in junction paint")
+    junc_item._paint_impl = failing_junc_paint
+
+    img = QImage(300, 300, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.black)
+    p = QPainter(img)
+
+    # Rendering scene must NOT raise any exception (paint safety guard catches and draws fallback)
+    scene.render(p, QRectF(0, 0, 300, 300), QRectF(0, 0, 300, 300))
+    p.end()
+
+    # Verify each item logged its error once
+    assert comp_item._paint_error_logged is True
+    assert wire_item._paint_error_logged is True
+    assert junc_item._paint_error_logged is True
+
+    # Verify fallback red dashed rectangle and '!' were drawn into the image
+    red_count = 0
+    for y in range(300):
+        for x in range(300):
+            c = img.pixelColor(x, y)
+            if c.red() > 200 and c.green() < 100 and c.blue() < 100:
+                red_count += 1
+
+    assert red_count > 50, f"Expected red fallback pixels, found {red_count}"
+
+    # Render a second time: no exceptions, logged flags remain True, no double logging
+    p2 = QPainter(img)
+    scene.render(p2, QRectF(0, 0, 300, 300), QRectF(0, 0, 300, 300))
+    p2.end()
+
+    # Verify log entries exist in crash.log
+    log_file = tmp_dir / "crash.log"
+    assert log_file.exists(), "crash.log must exist"
+    log_text = log_file.read_text(encoding="utf-8")
+    assert "Simulated failure in component paint" in log_text
+    assert "Simulated failure in wire paint" in log_text
+
+    scene.clear_schematic()
+    win.close()
+    reset_crash_state()
+finally:
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+"""
+    proc = _run_qt_script(script, timeout=20)
+    assert proc.returncode == 0, f"Subprocess failed with code {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
+
+
+
 

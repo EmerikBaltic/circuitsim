@@ -23,6 +23,7 @@ _dialog_active: bool = False
 _dialog_call_count: int = 0
 _dialog_handler: Callable[[str, int, Path | None], None] | None = None
 _recent_errors: dict[tuple[str, str, str], dict[str, Any]] = {}
+_global_log_dir: Path | None = None
 
 
 def set_shutting_down(shutting_down: bool = True) -> None:
@@ -61,11 +62,12 @@ def set_dialog_handler(
 
 def reset_crash_state() -> None:
     """Reset recent error deduplication cache and dialog counters (primarily for tests)."""
-    global _dialog_active, _dialog_call_count, _dialog_handler
+    global _dialog_active, _dialog_call_count, _dialog_handler, _global_log_dir
     _recent_errors.clear()
     _dialog_active = False
     _dialog_call_count = 0
     _dialog_handler = None
+    _global_log_dir = None
 
 
 def compute_error_signature(
@@ -145,8 +147,8 @@ def write_crash_log(
     log_dir: Path | None = None,
     count: int = 1,
 ) -> Path:
-    """Write crash report to crash.log in log_dir (defaulting to get_default_data_dir())."""
-    target_dir = log_dir or get_default_data_dir()
+    """Write crash report to crash.log in log_dir (defaulting to _global_log_dir or get_default_data_dir())."""
+    target_dir = log_dir or _global_log_dir or get_default_data_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
     log_file = target_dir / "crash.log"
     report = format_crash_report(exctype, value, tb, count=count)
@@ -217,6 +219,9 @@ def show_crash_dialog(
 
 def install_global_exception_hook(log_dir: Path | None = None) -> None:
     """Install custom sys.excepthook to log unhandled exceptions and alert the user."""
+    global _global_log_dir
+    if log_dir is not None:
+        _global_log_dir = log_dir
     orig_excepthook = sys.excepthook
 
     def _excepthook(

@@ -137,6 +137,50 @@ class WireItem(QGraphicsObject):
         option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
+        try:
+            self._paint_impl(painter, option, widget)
+        except Exception as exc:
+            self._handle_paint_error(painter, exc)
+
+    def _handle_paint_error(self, painter: QPainter, exc: Exception) -> None:
+        """Handle wire paint failure: log once per item and draw red dashed rectangle with '!'."""
+        if not getattr(self, "_paint_error_logged", False):
+            self._paint_error_logged = True
+            try:
+                from circuitsim.app.crash_handler import write_crash_log
+
+                write_crash_log(type(exc), exc, exc.__traceback__, count=1)
+            except Exception:
+                pass
+
+        try:
+            painter.save()
+            red_col = QColor("#FF5252")
+            pen = QPen(red_col, 1.8, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QBrush(QColor(255, 82, 82, 35)))
+            rect = self.boundingRect()
+            if rect.width() < 14:
+                rect = rect.adjusted(-7, 0, 7, 0)
+            if rect.height() < 14:
+                rect = rect.adjusted(0, -7, 0, 7)
+            painter.drawRoundedRect(rect, 3.0, 3.0)
+
+            font = QFont("Segoe UI", 10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(red_col)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "!")
+            painter.restore()
+        except Exception:
+            pass
+
+    def _paint_impl(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
         _ = (option, widget)
         if len(self._points) < 2:
             return
@@ -224,3 +268,74 @@ class WireItem(QGraphicsObject):
             painter.drawPath(self._path)
 
         painter.restore()
+
+
+class JunctionItem(QGraphicsObject):
+    """Visual junction dot item with paint safety guard."""
+
+    def __init__(
+        self,
+        position: QPointF,
+        theme: ThemeMode | str = ThemeMode.DARK,
+        parent: Any = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setPos(position)
+        self.theme: ThemeMode | str = theme
+        self._paint_error_logged: bool = False
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(-6.0, -6.0, 12.0, 12.0)
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        try:
+            self._paint_impl(painter, option, widget)
+        except Exception as exc:
+            self._handle_paint_error(painter, exc)
+
+    def _handle_paint_error(self, painter: QPainter, exc: Exception) -> None:
+        if not getattr(self, "_paint_error_logged", False):
+            self._paint_error_logged = True
+            try:
+                from circuitsim.app.crash_handler import write_crash_log
+
+                write_crash_log(type(exc), exc, exc.__traceback__, count=1)
+            except Exception:
+                pass
+
+        try:
+            painter.save()
+            red_col = QColor("#FF5252")
+            painter.setPen(QPen(red_col, 1.5, Qt.PenStyle.DashLine))
+            painter.setBrush(QBrush(QColor(255, 82, 82, 35)))
+            rect = self.boundingRect()
+            painter.drawRect(rect)
+            font = QFont("Segoe UI", 8)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.setPen(red_col)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "!")
+            painter.restore()
+        except Exception:
+            pass
+
+    def _paint_impl(
+        self,
+        painter: QPainter,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        _ = (option, widget)
+        palette = get_theme_palette(self.theme)
+        painter.save()
+        junc_color = QColor(palette.symbol_stroke)
+        painter.setPen(QPen(junc_color, 1.2))
+        painter.setBrush(QBrush(junc_color))
+        painter.drawEllipse(QPointF(0.0, 0.0), 4.2, 4.2)
+        painter.restore()
+

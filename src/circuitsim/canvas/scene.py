@@ -1265,24 +1265,43 @@ class CircuitScene(QGraphicsScene):
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         """Draw filled junction dots (T-junctions + explicit junctions) and terminal hover rings."""
         _ = rect
-        palette = get_theme_palette(self.theme)
-        painter.save()
+        try:
+            palette = get_theme_palette(self.theme)
+            painter.save()
 
-        # 1. Draw all active junction dots (T-junctions + explicit junctions on wires)
-        junc_color = QColor(palette.symbol_stroke)
-        painter.setPen(QPen(junc_color, 1.2))
-        painter.setBrush(QBrush(junc_color))
-        for jx, jy in self._active_junction_dots:
-            painter.drawEllipse(QPointF(float(jx), float(jy)), 4.2, 4.2)
+            # 1. Draw all active junction dots (T-junctions + explicit junctions on wires)
+            junc_color = QColor(palette.symbol_stroke)
+            painter.setPen(QPen(junc_color, 1.2))
+            painter.setBrush(QBrush(junc_color))
+            for jx, jy in self._active_junction_dots:
+                painter.drawEllipse(QPointF(float(jx), float(jy)), 4.2, 4.2)
 
-        # 2. Draw glowing highlight ring around hovered terminal or wire snap target
-        if self._hovered_terminal_pt is not None:
-            hx, hy = self._hovered_terminal_pt
-            hover_col = QColor(palette.terminal_hover)
-            fill_col = QColor(palette.terminal_hover)
-            fill_col.setAlpha(65)
-            painter.setPen(QPen(hover_col, 2.0))
-            painter.setBrush(QBrush(fill_col))
-            painter.drawEllipse(QPointF(float(hx), float(hy)), 7.0, 7.0)
+            # 2. Draw glowing highlight ring around hovered terminal or wire snap target
+            if self._hovered_terminal_pt is not None:
+                hx, hy = self._hovered_terminal_pt
+                hover_col = QColor(palette.terminal_hover)
+                fill_col = QColor(palette.terminal_hover)
+                fill_col.setAlpha(65)
+                painter.setPen(QPen(hover_col, 2.0))
+                painter.setBrush(QBrush(fill_col))
+                painter.drawEllipse(QPointF(float(hx), float(hy)), 7.0, 7.0)
 
-        painter.restore()
+            painter.restore()
+        except Exception as exc:
+            if not getattr(self, "_foreground_paint_error_logged", False):
+                self._foreground_paint_error_logged = True
+                try:
+                    from circuitsim.app.crash_handler import write_crash_log
+
+                    write_crash_log(type(exc), exc, exc.__traceback__, count=1)
+                except Exception:
+                    pass
+            try:
+                painter.save()
+                painter.setPen(QPen(QColor("#FF5252"), 1.5, Qt.PenStyle.DashLine))
+                for pt in self._active_junction_dots:
+                    r = QRectF(float(pt[0]) - 6.0, float(pt[1]) - 6.0, 12.0, 12.0)
+                    painter.drawRect(r)
+                painter.restore()
+            except Exception:
+                pass
