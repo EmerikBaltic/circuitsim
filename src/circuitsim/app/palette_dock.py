@@ -21,6 +21,7 @@ CATEGORY_ORDER: tuple[str, ...] = (
     "Sources",
     "Passive",
     "Switches",
+    "Semiconductors",
     "Loads",
     "Instruments",
 )
@@ -30,6 +31,7 @@ COMPONENT_ORDER_IN_CATEGORY: dict[str, tuple[str, ...]] = {
     "Sources": ("dc_voltage", "ac_voltage", "dc_current", "ground"),
     "Passive": ("resistor", "capacitor", "inductor"),
     "Switches": ("switch",),
+    "Semiconductors": ("led",),
     "Loads": ("lightbulb",),
     "Instruments": ("voltmeter", "ammeter"),
 }

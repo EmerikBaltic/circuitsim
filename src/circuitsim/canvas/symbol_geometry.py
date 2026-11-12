@@ -239,6 +239,76 @@ def polarity_mark_positions(
     return marks
 
 
+def led_marks(
+    rotation_deg: int = 0,
+    flipped_h: bool = False,
+    center_px: tuple[float, float] = (0.0, 0.0),
+) -> dict[str, tuple[float, float]]:
+    """Compute exact pixel positions of LED features (flat, cathode bar, A and K tags).
+
+    Uses the exact same transformed terminal positions as the netlist extraction engine
+    (`transform_terminal_position`), ensuring visual drawing and electrical connectivity
+    share a single unified source of geometric truth without Qt imports.
+
+    Returns:
+        dict with:
+            - 'anode_terminal': (x, y)
+            - 'cathode_terminal': (x, y)
+            - 'bar': (x, y) - midpoint of cathode bar
+            - 'flat': (x, y) - centroid / midpoint of cathode flat edge
+            - 'anode_tag': (x, y) - position for upright 'A' tag
+            - 'cathode_tag': (x, y) - position for upright 'K' tag
+    """
+    anode_t = transform_terminal_position(
+        (-2.0, 0.0), center_px, rotation_deg=rotation_deg, flipped_h=flipped_h
+    )
+    cathode_t = transform_terminal_position(
+        (2.0, 0.0), center_px, rotation_deg=rotation_deg, flipped_h=flipped_h
+    )
+
+    dx = cathode_t[0] - center_px[0]
+    dy = cathode_t[1] - center_px[1]
+    ux = dx / 40.0
+    uy = dy / 40.0
+
+    # Perpendicular unit vector (rotated 90 deg CCW in screen coordinates: px = uy, py = -ux)
+    px = uy
+    py = -ux
+
+    bar_pos = (
+        round(center_px[0] + 8.0 * ux, 3),
+        round(center_px[1] + 8.0 * uy, 3),
+    )
+
+    flat_pos = (
+        round(center_px[0] + 14.0 * ux, 3),
+        round(center_px[1] + 14.0 * uy, 3),
+    )
+
+    cathode_tag_pos = (
+        round(center_px[0] + 28.0 * ux + 8.0 * px, 3),
+        round(center_px[1] + 28.0 * uy + 8.0 * py, 3),
+    )
+
+    anode_tag_pos = (
+        round(center_px[0] - 28.0 * ux + 8.0 * px, 3),
+        round(center_px[1] - 28.0 * uy + 8.0 * py, 3),
+    )
+
+    return {
+        "anode_terminal": anode_t,
+        "cathode_terminal": cathode_t,
+        "anode": anode_t,
+        "cathode": cathode_t,
+        "bar": bar_pos,
+        "flat": flat_pos,
+        "anode_tag": anode_tag_pos,
+        "cathode_tag": cathode_tag_pos,
+        "tag_a": anode_tag_pos,
+        "tag_k": cathode_tag_pos,
+    }
+
+
 def parse_symbol_metadata_dict(
     data: dict[str, object],
     *,
@@ -413,6 +483,7 @@ def prepare_svg_for_theme(
     metadata: SymbolMetadata,
     *,
     stroke_color: str = "#E6EDF3",
+    flat_color: str | None = None,
 ) -> PreparedSvg:
     """Validate, sanitize, and recolour an SVG for the active theme.
 
@@ -544,6 +615,18 @@ def prepare_svg_for_theme(
     recoloured = serialized
     for pattern in _BLACK_COLOR_PATTERNS:
         recoloured = pattern.sub(stroke_color, recoloured)
+
+    if flat_color:
+        recoloured = re.sub(
+            r'(<[^>]*id=["\']cathode_flat["\'][^>]*stroke=["\'])[^"\']*(["\'])',
+            r'\g<1>' + flat_color + r'\2',
+            recoloured,
+        )
+        recoloured = re.sub(
+            r'(<[^>]*stroke=["\'])[^"\']*(["\'][^>]*id=["\']cathode_flat["\'])',
+            r'\g<1>' + flat_color + r'\2',
+            recoloured,
+        )
 
     return PreparedSvg(
         svg_bytes=recoloured.encode("utf-8"),

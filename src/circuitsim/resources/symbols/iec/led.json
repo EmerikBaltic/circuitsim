@@ -1,0 +1,15 @@
+{
+  "id": "led",
+  "display_name": "LED",
+  "category": "Semiconductors",
+  "style": "iec",
+  "grid_size": [4, 2],
+  "terminals": [
+    {"name": "anode", "grid_pos": [-2, 0]},
+    {"name": "cathode", "grid_pos": [2, 0]}
+  ],
+  "label_offset": [0, -1.2],
+  "value_offset": [0, 1.2],
+  "default_svg": "led.svg",
+  "states": {}
+}

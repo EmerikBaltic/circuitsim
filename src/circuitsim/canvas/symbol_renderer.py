@@ -64,11 +64,17 @@ class SymbolLibrary:
         *,
         state: str | None = None,
         stroke_color: str = "#E6EDF3",
+        flat_color: str | None = None,
     ) -> QSvgRenderer | None:
         """Return a themed `QSvgRenderer` if a valid SVG file exists, or `None` for fallback."""
         meta = self.get_metadata(component_id)
         svg_path = meta.svg_path_for_state(state)
-        cache_key = (component_id, state or "", stroke_color.upper())
+        cache_key = (
+            component_id,
+            state or "",
+            stroke_color.upper(),
+            (flat_color or "").upper(),
+        )
         if cache_key in self._svg_cache:
             return self._svg_cache[cache_key]
 
@@ -77,7 +83,9 @@ class SymbolLibrary:
             self._svg_cache[cache_key] = None
             return None
 
-        prepared = prepare_svg_for_theme(svg_path, meta, stroke_color=stroke_color)
+        prepared = prepare_svg_for_theme(
+            svg_path, meta, stroke_color=stroke_color, flat_color=flat_color
+        )
         if not prepared.is_valid or prepared.svg_bytes is None:
             if prepared.warning:
                 self._record_warning(prepared.warning)
@@ -120,7 +128,10 @@ class SymbolLibrary:
         target_rect = QRectF(-w_px / 2.0, -h_px / 2.0, float(w_px), float(h_px))
 
         svg_renderer = self.get_svg_renderer(
-            component_id, state=state, stroke_color=stroke_color
+            component_id,
+            state=state,
+            stroke_color=stroke_color,
+            flat_color=polarity_color if component_id == "led" else None,
         )
         used_svg = False
         if svg_renderer is not None and lever_angle_deg is None:
@@ -331,6 +342,32 @@ class SymbolLibrary:
             d = 15.0 * 0.70710678
             painter.drawLine(QPointF(-d, -d), QPointF(d, d))
             painter.drawLine(QPointF(-d, d), QPointF(d, -d))
+
+        elif component_id == "led":
+            # IEC LED symbol with cathode flat
+            painter.drawLine(QPointF(-40.0, 0.0), QPointF(-14.0, 0.0))
+            poly = QPolygonF([QPointF(-14.0, -9.0), QPointF(-14.0, 9.0), QPointF(4.0, 0.0)])
+            painter.drawPolygon(poly)
+            painter.drawLine(QPointF(4.0, -11.0), QPointF(4.0, 11.0))
+            painter.drawLine(QPointF(4.0, 0.0), QPointF(40.0, 0.0))
+
+            case_path = QPainterPath()
+            case_path.moveTo(10.0, 10.4)
+            case_path.arcTo(QRectF(-21.0, -17.0, 34.0, 34.0), 320.0, 260.0)
+            painter.drawPath(case_path)
+
+            painter.save()
+            if polarity_color:
+                painter.setPen(QPen(QColor(polarity_color), 2.0))
+            painter.drawLine(QPointF(10.0, -10.4), QPointF(10.0, 10.4))
+            painter.restore()
+
+            painter.drawLine(QPointF(1.0, -9.0), QPointF(10.0, -16.0))
+            painter.drawLine(QPointF(5.0, -16.0), QPointF(10.0, -16.0))
+            painter.drawLine(QPointF(10.0, -11.0), QPointF(10.0, -16.0))
+            painter.drawLine(QPointF(7.0, -7.0), QPointF(16.0, -14.0))
+            painter.drawLine(QPointF(11.0, -14.0), QPointF(16.0, -14.0))
+            painter.drawLine(QPointF(16.0, -9.0), QPointF(16.0, -14.0))
 
         elif component_id in ("voltmeter", "ammeter"):
             # Circle (r = 15) and leads

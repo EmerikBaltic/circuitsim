@@ -17,6 +17,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
+    QGraphicsSceneHoverEvent,
     QStyleOptionGraphicsItem,
     QWidget,
 )
@@ -30,6 +31,7 @@ from circuitsim.canvas.connectivity import (
 from circuitsim.canvas.symbol_geometry import (
     GRID_PITCH_PX,
     SymbolMetadata,
+    led_marks,
     snap_to_grid,
     transform_terminal_position,
 )
@@ -43,6 +45,7 @@ from circuitsim.components import (
     DCVoltageSource,
     Ground,
     Inductor,
+    LED,
     Lightbulb,
     Resistor,
     Switch,
@@ -202,6 +205,8 @@ class ComponentItem(QGraphicsObject):
         self._lever_anim: QVariantAnimation | None = None
 
         self.setToolTip(self.get_live_tooltip(is_running=False))
+        self.setAcceptHoverEvents(True)
+        self._is_hovered: bool = False
 
         if not is_ghost:
             self.setFlags(
@@ -344,6 +349,8 @@ class ComponentItem(QGraphicsObject):
                 else self.OPEN_LEVER_ANGLE_DEG
             )
         self.setToolTip(self.get_live_tooltip(is_running=False))
+        self.setAcceptHoverEvents(True)
+        self._is_hovered: bool = False
         self.update()
 
     def animate_switch_state(self, closed: bool, *, duration_ms: int = 110) -> None:
@@ -376,6 +383,16 @@ class ComponentItem(QGraphicsObject):
         if isinstance(value, (int, float)):
             self._lever_angle_deg = float(value)
             self.update()
+
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
 
     def set_snapped_pos(self, x_px: float, y_px: float) -> None:
         """Snap `(x_px, y_px)` to the 20 px grid and set the item's scene position."""
@@ -825,4 +842,18 @@ class ComponentItem(QGraphicsObject):
                     Qt.AlignmentFlag.AlignCenter,
                     "!",
                 )
+
+            # LED upright 'A' and 'K' tags next to terminals when selected or hovered
+            if self.component.component_type == "led" and (self.isSelected() or self._is_hovered):
+                marks = led_marks(self.rotation_deg, self.flipped_h, (0.0, 0.0))
+                tag_font = QFont("Segoe UI", 7)
+                tag_font.setBold(True)
+                painter.setFont(tag_font)
+                tag_col = QColor(palette.terminal_dot)
+                painter.setPen(tag_col)
+                ax, ay = marks["anode_tag"]
+                kx, ky = marks["cathode_tag"]
+                painter.drawText(QRectF(ax - 8.0, ay - 6.0, 16.0, 12.0), Qt.AlignmentFlag.AlignCenter, "A")
+                painter.drawText(QRectF(kx - 8.0, ky - 6.0, 16.0, 12.0), Qt.AlignmentFlag.AlignCenter, "K")
+
             painter.restore()

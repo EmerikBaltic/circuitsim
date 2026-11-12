@@ -25,6 +25,7 @@ class ComponentParameter:
     allow_zero: bool = False
     allow_negative: bool = False
     live_editable: bool = True
+    choices: tuple[str, ...] = ()
 
 
 _DEFAULT_PARAMETERS_BY_TYPE: dict[str, tuple[ComponentParameter, ...]] = {
@@ -76,6 +77,11 @@ _DEFAULT_PARAMETERS_BY_TYPE: dict[str, tuple[ComponentParameter, ...]] = {
     "lightbulb": (
         ComponentParameter("rated_power", "Rated Power", "W"),
         ComponentParameter("rated_voltage", "Rated Voltage", "V"),
+    ),
+    "led": (
+        ComponentParameter("forward_voltage", "Forward Voltage", "V"),
+        ComponentParameter("rated_current", "Rated Current", "A"),
+        ComponentParameter("max_current", "Max Current", "A"),
     ),
     "switch": (
         ComponentParameter("r_on", "ON Resistance", "Ω"),
