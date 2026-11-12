@@ -127,3 +127,109 @@ def test_every_palette_attribute_in_code_exists_in_both_themes() -> None:
         assert hasattr(DARK_PALETTE, attr), f"Attribute '{attr}' accessed in {locations} is missing from DARK_PALETTE"
         assert hasattr(LIGHT_PALETTE, attr), f"Attribute '{attr}' accessed in {locations} is missing from LIGHT_PALETTE"
 
+
+def test_smoke_render_every_palette_entry_all_orientations_states_and_themes() -> None:
+    """Item 3: Smoke test rendering every palette entry across 8 orientations, selected/hovered, running/stopped, and both themes."""
+    script = """
+import os
+import sys
+import time
+import traceback
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QImage, QPainter
+from PySide6.QtWidgets import QApplication
+
+from circuitsim.app.main_window import MainWindow
+from circuitsim.app.themes import ThemeMode
+from circuitsim.components import LED, Lightbulb, Switch
+
+captured = []
+def hook(exctype, value, tb):
+    captured.append((exctype, value, "".join(traceback.format_exception(exctype, value, tb))))
+
+sys.excepthook = hook
+
+app = QApplication.instance() or QApplication([])
+win = MainWindow()
+win.show()
+scene = win.circuit_scene
+
+ORIENTATIONS = [
+    (0, False), (90, False), (180, False), (270, False),
+    (0, True), (90, True), (180, True), (270, True)
+]
+
+PALETTE_KEYS = [
+    "ac_voltage", "ammeter", "capacitor", "dc_current", "dc_voltage",
+    "ground", "inductor", "led", "lightbulb", "resistor", "switch", "voltmeter"
+]
+
+LED_STATES = {
+    "off": {"voltage": 0.0, "current": 0.0, "brightness": 0.0, "is_over_current": False, "burned_out": False},
+    "dim": {"voltage": 1.8, "current": 0.002, "brightness": 0.316, "is_over_current": False, "burned_out": False},
+    "on": {"voltage": 2.0, "current": 0.020, "brightness": 1.0, "is_over_current": False, "burned_out": False},
+    "over": {"voltage": 2.2, "current": 0.035, "brightness": 1.32, "is_over_current": True, "burned_out": False},
+    "burned": {"voltage": 0.0, "current": 0.0, "brightness": 0.0, "is_over_current": False, "burned_out": True},
+    "reverse": {"voltage": -5.0, "current": 0.0, "brightness": 0.0, "is_over_current": False, "burned_out": False},
+}
+
+img = QImage(240, 240, QImage.Format.Format_ARGB32)
+p = QPainter(img)
+
+render_count = 0
+for theme in [ThemeMode.DARK, ThemeMode.LIGHT]:
+    win.apply_theme(theme)
+    for comp_key in PALETTE_KEYS:
+        scene.clear_schematic()
+        item = scene.place_new_component(comp_key, QPointF(200.0, 200.0))
+        for rot, flip in ORIENTATIONS:
+            item.rotation_deg = rot
+            item.flipped_h = flip
+            for sel in [False, True]:
+                item.setSelected(sel)
+                for hov in [False, True]:
+                    item._is_hovered = hov
+                    if comp_key == "led":
+                        for state_name, svals in LED_STATES.items():
+                            for k, v in svals.items():
+                                setattr(item.component, k, v)
+                            scene.render(p, QRectF(0, 0, 240, 240), item.sceneBoundingRect())
+                            render_count += 1
+                    else:
+                        for running in [False, True]:
+                            if running:
+                                item.live_display_value = "5.0 V"
+                                if isinstance(item.component, Lightbulb):
+                                    item.component.voltage = 12.0
+                                    item.component.current = 1.0
+                                elif isinstance(item.component, Switch):
+                                    item.component.closed = True
+                                    item._lever_angle_deg = 0.0
+                            else:
+                                item.live_display_value = None
+                                if isinstance(item.component, Lightbulb):
+                                    item.component.voltage = 0.0
+                                    item.component.current = 0.0
+                                elif isinstance(item.component, Switch):
+                                    item.component.closed = False
+                                    item._lever_angle_deg = 30.0
+                            scene.render(p, QRectF(0, 0, 240, 240), item.sceneBoundingRect())
+                            render_count += 1
+
+p.end()
+scene.clear_schematic()
+win.close()
+
+if captured:
+    print(f"CAPTURED {len(captured)} EXCEPTIONS IN SMOKE TEST:")
+    for exc in captured:
+        print(exc)
+
+assert len(captured) == 0, f"Expected 0 exceptions, caught {len(captured)}"
+"""
+    proc = _run_qt_script(script, timeout=30)
+    assert proc.returncode == 0, f"Subprocess failed with code {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
+
+
