@@ -93,3 +93,37 @@ assert len(captured) == 0, f"Expected 0 exceptions, caught {len(captured)}: {[st
     if proc.stderr:
         print(proc.stderr, file=sys.stderr)
     assert proc.returncode == 0, f"Subprocess failed with code {proc.returncode}:\n{proc.stdout}\n{proc.stderr}"
+
+
+def test_every_palette_attribute_in_code_exists_in_both_themes() -> None:
+    """Item 2: Verify that every attribute accessed on palette in the codebase exists in both Dark and Light themes."""
+    import ast
+    from pathlib import Path
+    import dataclasses
+    from circuitsim.app.themes import DARK_PALETTE, LIGHT_PALETTE, ThemePalette
+
+    fields = {f.name for f in dataclasses.fields(ThemePalette)}
+    assert "symbol_label" in fields, "symbol_label must be a defined field of ThemePalette"
+
+    # Verify both palette instances have all attributes with valid non-empty values
+    for palette, name in [(DARK_PALETTE, "DARK_PALETTE"), (LIGHT_PALETTE, "LIGHT_PALETTE")]:
+        for field in fields:
+            assert hasattr(palette, field), f"{name} is missing field {field}"
+            val = getattr(palette, field)
+            assert val is not None and str(val).strip() != "", f"{name}.{field} must not be empty"
+
+    # Scan all Python files under src/circuitsim for any attribute accessed on an object named palette
+    src_dir = Path(__file__).resolve().parents[1] / "src" / "circuitsim"
+    accessed_attrs: dict[str, list[str]] = {}
+
+    for py_file in src_dir.rglob("*.py"):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                if "palette" in node.value.id.lower():
+                    accessed_attrs.setdefault(node.attr, []).append(f"{py_file.name}:{node.lineno}")
+
+    for attr, locations in accessed_attrs.items():
+        assert hasattr(DARK_PALETTE, attr), f"Attribute '{attr}' accessed in {locations} is missing from DARK_PALETTE"
+        assert hasattr(LIGHT_PALETTE, attr), f"Attribute '{attr}' accessed in {locations} is missing from LIGHT_PALETTE"
+

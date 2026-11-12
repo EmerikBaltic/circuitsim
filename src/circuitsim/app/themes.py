@@ -26,6 +26,7 @@ class ThemePalette:
     grid_origin: str
     symbol_stroke: str
     symbol_text: str
+    symbol_label: str
     terminal_dot: str
     terminal_hover: str
     selection_accent: str
@@ -43,6 +44,7 @@ DARK_PALETTE = ThemePalette(
     grid_origin="#388BFD",
     symbol_stroke="#E6EDF3",
     symbol_text="#C9D1D9",
+    symbol_label="#8B949E",
     terminal_dot="#58A6FF",
     terminal_hover="#FF7B72",
     selection_accent="#388BFD",
@@ -60,6 +62,7 @@ LIGHT_PALETTE = ThemePalette(
     grid_origin="#0969DA",
     symbol_stroke="#1F2328",
     symbol_text="#24292F",
+    symbol_label="#57606A",
     terminal_dot="#0969DA",
     terminal_hover="#CF222E",
     selection_accent="#0969DA",
