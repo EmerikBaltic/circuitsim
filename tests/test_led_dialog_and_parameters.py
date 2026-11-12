@@ -8,12 +8,8 @@ import subprocess
 import sys
 import pytest
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
-
 from circuitsim.canvas.connectivity import PlacedComponentSpec
 from circuitsim.components import LED, LED_COLOUR_PRESETS, Resistor
-from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 from circuitsim.io.circ_serializer import (
     CircuitDocument,
     dumps_document,
@@ -21,94 +17,119 @@ from circuitsim.io.circ_serializer import (
 )
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=25,
+    )
 
 
-def test_led_color_presets_and_swatches(qapp: QApplication) -> None:
+def test_led_color_presets_and_swatches() -> None:
     """Verify color presets, swatches, datasheet labels, and automatic switch to Custom on manual edit."""
-    led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Red")
-    dlg = QuickValueDialog(led)
+    script = """
+import sys
+from PySide6.QtWidgets import QApplication
+from circuitsim.components import LED
+from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 
-    assert dlg.led_color_combo is not None
-    assert dlg.led_datasheet_lbl is not None
-    assert dlg.led_datasheet_hint_lbl is not None
+app = QApplication.instance() or QApplication([])
+led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Red")
+dlg = QuickValueDialog(led)
 
-    expected_colors = [
-        "Red",
-        "Orange",
-        "Yellow",
-        "Green",
-        "Pure green",
-        "Blue",
-        "White",
-        "Custom",
-    ]
-    actual_colors = [
-        dlg.led_color_combo.itemText(i)
-        for i in range(dlg.led_color_combo.count())
-    ]
-    assert actual_colors == expected_colors
+assert dlg.led_color_combo is not None
+assert dlg.led_datasheet_lbl is not None
+assert dlg.led_datasheet_hint_lbl is not None
 
-    # Each item must have an icon (swatch)
-    for i in range(dlg.led_color_combo.count()):
-        icon = dlg.led_color_combo.itemIcon(i)
-        assert not icon.isNull(), f"Color {actual_colors[i]} missing swatch icon"
+expected_colors = [
+    "Red",
+    "Orange",
+    "Yellow",
+    "Green",
+    "Pure green",
+    "Blue",
+    "White",
+    "Custom",
+]
+actual_colors = [
+    dlg.led_color_combo.itemText(i)
+    for i in range(dlg.led_color_combo.count())
+]
+assert actual_colors == expected_colors
 
-    # Default is Red -> 2.0 V
-    assert dlg.led_color_combo.currentText() == "Red"
-    assert dlg.inputs["forward_voltage"].text() == "2"
-    assert "2.0 V" in dlg.led_datasheet_lbl.text()
-    assert "1.8–2.4 V" in dlg.led_datasheet_lbl.text()
-    assert "typical datasheet values; real LEDs vary by about +-0.3 V" in dlg.led_datasheet_hint_lbl.text()
+# Each item must have an icon (swatch)
+for i in range(dlg.led_color_combo.count()):
+    icon = dlg.led_color_combo.itemIcon(i)
+    assert not icon.isNull(), f"Color {actual_colors[i]} missing swatch icon"
 
-    # Select Blue -> forward voltage updates to 3.2 V immediately
-    dlg.led_color_combo.setCurrentText("Blue")
-    assert dlg.inputs["forward_voltage"].text() == "3.2"
-    assert "3.2 V" in dlg.led_datasheet_lbl.text()
-    assert "3.0–3.6 V" in dlg.led_datasheet_lbl.text()
+# Default is Red -> 2.0 V
+assert dlg.led_color_combo.currentText() == "Red"
+assert dlg.inputs["forward_voltage"].text() == "2"
+assert "2.0 V" in dlg.led_datasheet_lbl.text()
+assert "1.8–2.4 V" in dlg.led_datasheet_lbl.text()
+assert "typical datasheet values; real LEDs vary by about +-0.3 V" in dlg.led_datasheet_hint_lbl.text()
 
-    # Select Green -> forward voltage updates to 2.2 V immediately
-    dlg.led_color_combo.setCurrentText("Green")
-    assert dlg.inputs["forward_voltage"].text() == "2.2"
-    assert "2.2 V" in dlg.led_datasheet_lbl.text()
-    assert "2.0–2.6 V" in dlg.led_datasheet_lbl.text()
+# Select Blue -> forward voltage updates to 3.2 V immediately
+dlg.led_color_combo.setCurrentText("Blue")
+assert dlg.inputs["forward_voltage"].text() == "3.2"
+assert "3.2 V" in dlg.led_datasheet_lbl.text()
+assert "3.0–3.6 V" in dlg.led_datasheet_lbl.text()
 
-    # Edit voltage by hand to 2.8 V -> combo automatically switches to Custom
-    dlg.inputs["forward_voltage"].setText("2.8")
-    assert dlg.led_color_combo.currentText() == "Custom"
-    assert "Custom" in dlg.led_datasheet_lbl.text()
+# Select Green -> forward voltage updates to 2.2 V immediately
+dlg.led_color_combo.setCurrentText("Green")
+assert dlg.inputs["forward_voltage"].text() == "2.2"
+assert "2.2 V" in dlg.led_datasheet_lbl.text()
+assert "2.0–2.6 V" in dlg.led_datasheet_lbl.text()
+
+# Edit voltage by hand to 2.8 V -> combo automatically switches to Custom
+dlg.inputs["forward_voltage"].setText("2.8")
+assert dlg.led_color_combo.currentText() == "Custom"
+assert "Custom" in dlg.led_datasheet_lbl.text()
+"""
+    proc = _run_qt_script(script)
+    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
 
 
-def test_led_dialog_burnout_and_current_validation(qapp: QApplication) -> None:
+def test_led_dialog_burnout_and_current_validation() -> None:
     """Verify editable rated current, max current, burnout checkbox, and threshold validation."""
-    led = LED("D1", "n1", "0", forward_voltage=2.0, rated_current=0.02, max_current=0.03)
-    dlg = QuickValueDialog(led)
+    script = """
+import math
+import sys
+from PySide6.QtWidgets import QApplication
+from circuitsim.components import LED
+from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 
-    assert "rated_current" in dlg.inputs
-    assert "max_current" in dlg.inputs
-    assert dlg.led_burnout_cb is not None
-    assert dlg.led_burnout_current_edit is not None
+app = QApplication.instance() or QApplication([])
+led = LED("D1", "n1", "0", forward_voltage=2.0, rated_current=0.02, max_current=0.03)
+dlg = QuickValueDialog(led)
 
-    assert not dlg.led_burnout_cb.isChecked()
-    dlg.led_burnout_cb.setChecked(True)
-    dlg.led_burnout_current_edit.setText("45m")
+assert "rated_current" in dlg.inputs
+assert "max_current" in dlg.inputs
+assert dlg.led_burnout_cb is not None
+assert dlg.led_burnout_current_edit is not None
 
-    parsed, err = dlg.validate_inputs()
-    assert err is None
-    assert parsed is not None
-    assert math.isclose(parsed["burnout_current"], 0.045, abs_tol=1e-5)
-    assert parsed["burnout_enabled"] is True
+assert not dlg.led_burnout_cb.isChecked()
+dlg.led_burnout_cb.setChecked(True)
+dlg.led_burnout_current_edit.setText("45m")
 
-    # Invalid negative threshold
-    dlg.led_burnout_current_edit.setText("-10m")
-    parsed_bad, err_bad = dlg.validate_inputs()
-    assert parsed_bad is None
-    assert "greater than 0" in (err_bad or "")
+parsed, err = dlg.validate_inputs()
+assert err is None
+assert parsed is not None
+assert math.isclose(parsed["burnout_current"], 0.045, abs_tol=1e-5)
+assert parsed["burnout_enabled"] is True
+
+# Invalid negative threshold
+dlg.led_burnout_current_edit.setText("-10m")
+parsed_bad, err_bad = dlg.validate_inputs()
+assert parsed_bad is None
+assert "greater than 0" in (err_bad or "")
+"""
+    proc = _run_qt_script(script)
+    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
 
 
 def test_led_circ_file_round_trip_serialization() -> None:
@@ -152,18 +173,6 @@ def test_led_circ_file_round_trip_serialization() -> None:
     assert loaded_spec.center_px == (100.0, 140.0)
     assert loaded_spec.rotation_deg == 90
     assert loaded_spec.flipped_h is True
-
-
-def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=25,
-    )
 
 
 def test_dialog_never_shifts_canvas_view_or_scene_rect() -> None:

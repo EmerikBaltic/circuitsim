@@ -8,24 +8,22 @@ import sys
 import os
 import pytest
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QApplication
-
-from circuitsim.canvas.component_item import ComponentItem
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.components import DCVoltageSource, Ground, LED, Resistor
 from circuitsim.engine.netlist import Circuit
 from circuitsim.engine.simulation_session import SimulationSession
 from circuitsim.engine.solver import MNASolver
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=25,
+    )
 
 
 def test_led_perceptual_glow_mapping_and_cutoffs() -> None:
@@ -113,58 +111,57 @@ def test_led_over_current_and_burnout() -> None:
     assert led.is_over_current is False
 
 
-def test_led_live_tooltip(qapp: QApplication) -> None:
+def test_led_live_tooltip() -> None:
     """Verify LED tooltip formatting with colour, voltage, current, and state."""
-    led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Pure green", color="#00E676")
-    item = ComponentItem(led, SymbolLibrary())
+    script = """
+import sys
+from PySide6.QtWidgets import QApplication
+from circuitsim.canvas.component_item import ComponentItem
+from circuitsim.canvas.symbol_renderer import SymbolLibrary
+from circuitsim.components import LED
 
-    # Stopped state
-    tt_stopped = item.get_live_tooltip(is_running=False)
-    assert "Name: D1" in tt_stopped
-    assert "Colour: Pure green" in tt_stopped
-    assert "Voltage: --" in tt_stopped
-    assert "Current: --" in tt_stopped
-    assert "State: Off" in tt_stopped
+app = QApplication.instance() or QApplication([])
+led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Pure green", color="#00E676")
+item = ComponentItem(led, SymbolLibrary())
 
-    # Running state conducting
-    led.voltage = 2.05
-    led.current = 0.020
-    led.brightness = 1.0
-    tt_running = item.get_live_tooltip(is_running=True)
-    assert "Voltage: 2.05 V" in tt_running
-    assert "Current: 20 mA" in tt_running
-    assert "State: On" in tt_running
+# Stopped state
+tt_stopped = item.get_live_tooltip(is_running=False)
+assert "Name: D1" in tt_stopped
+assert "Colour: Pure green" in tt_stopped
+assert "Voltage: --" in tt_stopped
+assert "Current: --" in tt_stopped
+assert "State: Off" in tt_stopped
 
-    # Running state over-current
-    led.is_over_current = True
-    tt_over = item.get_live_tooltip(is_running=True)
-    assert "State: Over-current" in tt_over
+# Running state conducting
+led.voltage = 2.05
+led.current = 0.020
+led.brightness = 1.0
+tt_running = item.get_live_tooltip(is_running=True)
+assert "Voltage: 2.05 V" in tt_running
+assert "Current: 20 mA" in tt_running
+assert "State: On" in tt_running
 
-    # Running state burned out
-    led.burned_out = True
-    tt_burned = item.get_live_tooltip(is_running=True)
-    assert "State: Burned out" in tt_burned
+# Running state over-current
+led.is_over_current = True
+tt_over = item.get_live_tooltip(is_running=True)
+assert "State: Over-current" in tt_over
 
-    # Reverse biased
-    led.burned_out = False
-    led.is_over_current = False
-    led.voltage = -3.5
-    led.current = 0.0
-    led.brightness = 0.0
-    tt_rev = item.get_live_tooltip(is_running=True)
-    assert "State: Reverse-biased" in tt_rev
+# Running state burned out
+led.burned_out = True
+tt_burned = item.get_live_tooltip(is_running=True)
+assert "State: Burned out" in tt_burned
 
-
-def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=25,
-    )
+# Reverse biased
+led.burned_out = False
+led.is_over_current = False
+led.voltage = -3.5
+led.current = 0.0
+led.brightness = 0.0
+tt_rev = item.get_live_tooltip(is_running=True)
+assert "State: Reverse-biased" in tt_rev
+"""
+    proc = _run_qt_script(script)
+    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
 
 
 def test_offscreen_led_drawing_glow_and_burned_out_cross() -> None:

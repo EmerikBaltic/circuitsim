@@ -43,7 +43,9 @@ class SymbolLibrary:
 
     def __init__(self, symbols_dir: Path = DEFAULT_IEC_SYMBOLS_DIR) -> None:
         self.symbols_dir: Path = symbols_dir
-        self._metadata: dict[str, SymbolMetadata] = load_all_iec_metadata(symbols_dir)
+        self._metadata: dict[str, SymbolMetadata] = load_all_iec_metadata(
+            symbols_dir, include_extensions=True
+        )
         self._svg_cache: dict[tuple[str, str, str], QSvgRenderer | None] = {}
         self.warnings: list[str] = []
         self._seen_warnings: set[str] = set()

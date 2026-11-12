@@ -401,8 +401,25 @@ def load_symbol_metadata(json_path: Path) -> SymbolMetadata:
     return parse_symbol_metadata_dict(data, symbol_dir=json_path.parent)
 
 
+CORE_MILESTONE2_IEC_SYMBOLS: frozenset[str] = frozenset({
+    "resistor",
+    "capacitor",
+    "inductor",
+    "dc_voltage",
+    "ac_voltage",
+    "dc_current",
+    "ground",
+    "switch",
+    "lightbulb",
+    "voltmeter",
+    "ammeter",
+})
+
+
 def load_all_iec_metadata(
     symbols_dir: Path = DEFAULT_IEC_SYMBOLS_DIR,
+    *,
+    include_extensions: bool = False,
 ) -> dict[str, SymbolMetadata]:
     """Load all `.json` symbol metadata files from `symbols_dir` keyed by component id."""
     catalog: dict[str, SymbolMetadata] = {}
@@ -410,6 +427,8 @@ def load_all_iec_metadata(
         return catalog
     for json_path in sorted(symbols_dir.glob("*.json")):
         meta = load_symbol_metadata(json_path)
+        if not include_extensions and meta.component_id not in CORE_MILESTONE2_IEC_SYMBOLS:
+            continue
         catalog[meta.component_id] = meta
     return catalog
 

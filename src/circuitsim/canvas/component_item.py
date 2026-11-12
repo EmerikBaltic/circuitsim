@@ -926,7 +926,7 @@ class ComponentItem(QGraphicsObject):
                 tag_font = QFont("Segoe UI", 7)
                 tag_font.setBold(True)
                 painter.setFont(tag_font)
-                tag_col = QColor(palette.terminal_dot)
+                tag_col = QColor(palette.symbol_label)
                 painter.setPen(tag_col)
                 ax, ay = marks["anode_tag"]
                 kx, ky = marks["cathode_tag"]

@@ -318,7 +318,7 @@ def extract_connectivity(
     catalog = (
         symbol_catalog
         if symbol_catalog is not None
-        else load_all_iec_metadata(DEFAULT_IEC_SYMBOLS_DIR)
+        else load_all_iec_metadata(DEFAULT_IEC_SYMBOLS_DIR, include_extensions=True)
     )
 
     uf = _UnionFind()

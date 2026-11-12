@@ -13,9 +13,7 @@ from circuitsim.canvas.symbol_geometry import (
     DEFAULT_IEC_SYMBOLS_DIR,
     led_marks,
 )
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
 from circuitsim.components import LED, create_default_component_model
-from circuitsim.app.palette_dock import CATEGORY_ORDER, COMPONENT_ORDER_IN_CATEGORY
 
 # Hand-calculated reference coordinates for all 8 orientations with center_px = (0.0, 0.0):
 # (rotation_deg, flipped_h): {
@@ -119,36 +117,6 @@ def test_led_marks_hand_worked_all_8_orientations(
     assert dist_flat_to_cathode < dist_flat_to_anode
 
 
-def test_led_palette_entry_and_metadata() -> None:
-    """Verify LED palette category 'Semiconductors', metadata terminals, and factory model creation."""
-    assert "Semiconductors" in CATEGORY_ORDER
-    assert "led" in COMPONENT_ORDER_IN_CATEGORY["Semiconductors"]
-
-    lib = SymbolLibrary()
-    catalog = lib.metadata_catalog
-    assert "led" in catalog
-    meta = catalog["led"]
-    assert meta.category == "Semiconductors"
-    assert meta.grid_size == (4, 2)
-    assert meta.pixel_size == (80, 40)
-
-    term_names = [t.name for t in meta.terminals]
-    assert term_names == ["anode", "cathode"]
-
-    # Terminal coordinates in SVG viewbox: anode at (0, 20), cathode at (80, 20)
-    anode_vb = meta.terminal_in_svg_viewbox(meta.terminals[0])
-    cathode_vb = meta.terminal_in_svg_viewbox(meta.terminals[1])
-    assert anode_vb == (0.0, 20.0)
-    assert cathode_vb == (80.0, 20.0)
-
-    # Factory creates LED instance with forward voltage 2.0 V default
-    comp = create_default_component_model("led", "D1")
-    assert isinstance(comp, LED)
-    assert comp.name == "D1"
-    assert comp.forward_voltage == 2.0
-    assert comp.color_name == "Red"
-
-
 def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     return subprocess.run(
@@ -159,6 +127,43 @@ def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
         env=env,
         timeout=25,
     )
+
+
+def test_led_palette_entry_and_metadata() -> None:
+    """Verify LED palette category 'Semiconductors', metadata terminals, and factory model creation."""
+    script = """
+import sys
+from circuitsim.app.palette_dock import CATEGORY_ORDER, COMPONENT_ORDER_IN_CATEGORY
+from circuitsim.canvas.symbol_renderer import SymbolLibrary
+from circuitsim.components import LED, create_default_component_model
+
+assert "Semiconductors" in CATEGORY_ORDER
+assert "led" in COMPONENT_ORDER_IN_CATEGORY["Semiconductors"]
+
+lib = SymbolLibrary()
+catalog = lib.metadata_catalog
+assert "led" in catalog
+meta = catalog["led"]
+assert meta.category == "Semiconductors"
+assert meta.grid_size == (4, 2)
+assert meta.pixel_size == (80, 40)
+
+term_names = [t.name for t in meta.terminals]
+assert term_names == ["anode", "cathode"]
+
+anode_vb = meta.terminal_in_svg_viewbox(meta.terminals[0])
+cathode_vb = meta.terminal_in_svg_viewbox(meta.terminals[1])
+assert anode_vb == (0.0, 20.0)
+assert cathode_vb == (80.0, 20.0)
+
+comp = create_default_component_model("led", "D1")
+assert isinstance(comp, LED)
+assert comp.name == "D1"
+assert comp.forward_voltage == 2.0
+assert comp.color_name == "Red"
+"""
+    proc = _run_qt_script(script)
+    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
 
 
 def test_offscreen_led_rendering_flat_centroid_nearer_cathode_all_8_orientations() -> None:

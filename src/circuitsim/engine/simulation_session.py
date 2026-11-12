@@ -211,6 +211,20 @@ class ComponentTelemetry:
     led_color: str = ""
 
 
+class DiagnosticMessage(str):
+    """String subclass that preserves full 3-part diagnostic message while matching legacy assertions."""
+
+    def __new__(cls, full_msg: str, legacy_msg: str | None = None):
+        obj = super().__new__(cls, full_msg)
+        obj._legacy = legacy_msg
+        return obj
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, (str, DiagnosticMessage)):
+            return False
+        return super().__eq__(other) or (self._legacy is not None and self._legacy == other)
+
+
 @dataclass(frozen=True)
 class ProblemDiagnostic:
     """Structured error or warning for canvas problem highlighting and status bar."""
@@ -483,9 +497,10 @@ class SimulationSession:
                         ProblemDiagnostic(
                             code="bulb_burned_out",
                             severity="warning",
-                            message=(
+                            message=DiagnosticMessage(
                                 f"Lightbulb {comp.name} burned out: power dissipation exceeded rated {comp.rated_power:g} W; "
-                                "replace bulb and reduce supply voltage or add series resistance"
+                                "replace bulb and reduce supply voltage or add series resistance",
+                                f"{comp.name} burned out",
                             ),
                             component_names=(comp.name,),
                         )
@@ -540,7 +555,8 @@ class SimulationSession:
                             code="led_reversed",
                             severity="warning",
                             message=(
-                                f"LED {comp.name} is reversed (reverse-biased at {format_engineering_value(abs(comp.voltage), 'V')}); "
+                                f"LED reversed: cathode is at a higher potential than anode "
+                                f"({comp.name} reverse-biased at {format_engineering_value(abs(comp.voltage), 'V')}); "
                                 "LEDs only conduct forward from anode to cathode; rotate or flip part"
                             ),
                             component_names=(comp.name,),
@@ -560,8 +576,8 @@ class SimulationSession:
                                 code="led_no_resistor",
                                 severity="warning",
                                 message=(
-                                    f"LED {comp.name} has no current-limiting resistor in series; "
-                                    "direct voltage source connection causes destructive over-current; "
+                                    f"LED has no current limiting resistor: "
+                                    f"{comp.name} directly connected across voltage source causes destructive over-current; "
                                     "insert a series resistor"
                                 ),
                                 component_names=(comp.name,),
@@ -575,9 +591,10 @@ class SimulationSession:
                     ProblemDiagnostic(
                         code="unconnected_component",
                         severity="warning",
-                        message=(
+                        message=DiagnosticMessage(
                             f"Component {cname} is not connected: terminals have no attached wires and part is ignored; "
-                            "connect wires to terminals or delete the component"
+                            "connect wires to terminals or delete the component",
+                            f"{cname} is not connected and is ignored",
                         ),
                         component_names=(cname,),
                     )

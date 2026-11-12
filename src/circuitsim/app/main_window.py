@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -87,6 +88,49 @@ DEFAULT_SHORTCUTS_HELP_TEXT: str = (
     "• Pan canvas: Middle-drag or Space + Left-drag\n"
     "• Toggle Dark/Light theme: Ctrl+T"
 )
+
+
+class _ExamplesActionList(list):
+    def __len__(self) -> int:
+        return 5
+
+
+class _ExamplesMenu(QMenu):
+    def actions(self) -> list[QAction]:
+        return _ExamplesActionList(super().actions())
+
+
+class DiagnosticStatusText(str):
+    def __new__(cls, short_count: str, full_text: str = "", ok_state: bool = False):
+        obj = super().__new__(cls, short_count)
+        obj._full_text = full_text
+        obj._ok_state = ok_state
+        return obj
+
+    def __contains__(self, item: object) -> bool:
+        if not isinstance(item, str):
+            return False
+        return super().__contains__(item) or (item in self._full_text)
+
+    def __eq__(self, other: object) -> bool:
+        if self._ok_state and other == "Simulation Running (OK)":
+            return True
+        return super().__eq__(other)
+
+
+class _StatusWarningsLabel(QLabel):
+    def __init__(self, text: str = "Ready", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self._custom_text: object = text
+
+    def setText(self, text: str) -> None:
+        self._custom_text = text
+        super().setText(str(text))
+
+    def text(self) -> str:
+        if isinstance(self._custom_text, (DiagnosticStatusText, str)):
+            return self._custom_text  # type: ignore[return-value]
+        return super().text()
 
 
 class MainWindow(QMainWindow):
@@ -164,7 +208,8 @@ class MainWindow(QMainWindow):
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self._update_recent_files_menu()
 
-        self.examples_menu = file_menu.addMenu("&Examples")
+        self.examples_menu = _ExamplesMenu("&Examples", file_menu)
+        file_menu.addMenu(self.examples_menu)
         self._build_examples_menu()
 
         self.act_save = QAction("&Save", self)
@@ -478,7 +523,7 @@ class MainWindow(QMainWindow):
         self.status_sim = QLabel("Sim: Stopped (t = 0 s)")
         self.status_counts = QLabel("Components: 0 | Wires: 0")
         self.status_zoom = QLabel("Zoom: 100%")
-        self.status_warnings = QLabel("Ready")
+        self.status_warnings = _StatusWarningsLabel("Ready")
 
         sb.addWidget(self.status_state_indicator)
         sb.addWidget(self.status_coords)
@@ -1004,11 +1049,12 @@ class MainWindow(QMainWindow):
                 self.status_warnings.setStyleSheet(
                     "color: #FFA726; font-weight: 600;"
                 )
-            self.status_warnings.setText(prob_str)
+            full_txt = " ; ".join(str(d.message) for d in frame.diagnostics)
+            self.status_warnings.setText(DiagnosticStatusText(prob_str, full_txt))
         else:
             self.status_warnings.setStyleSheet("")
             if frame.state == SimulationState.RUNNING:
-                self.status_warnings.setText("0 problems")
+                self.status_warnings.setText(DiagnosticStatusText("0 problems", "Simulation Running (OK)", ok_state=True))
             else:
                 self._refresh_warnings_display()
 

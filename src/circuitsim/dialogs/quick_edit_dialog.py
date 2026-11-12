@@ -348,7 +348,7 @@ class QuickValueDialog(QDialog):
 
         if isinstance(self.component, Lightbulb):
             if self.bulb_burnout_cb is not None:
-                parsed_map["burnout_enabled"] = 1.0 if self.bulb_burnout_cb.isChecked() else 0.0
+                parsed_map["burnout_enabled"] = bool(self.bulb_burnout_cb.isChecked())
             if self.burnout_ratio_edit is not None:
                 try:
                     ratio = float(self.burnout_ratio_edit.text().strip())

@@ -7,10 +7,6 @@ import subprocess
 import sys
 import pytest
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
-
-from circuitsim.app.problems_panel import ProblemsPanel
 from circuitsim.components import DCVoltageSource, Ground, LED, Resistor
 from circuitsim.engine.netlist import Circuit
 from circuitsim.engine.simulation_session import (
@@ -20,67 +16,81 @@ from circuitsim.engine.simulation_session import (
 )
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=25,
+    )
 
 
-def test_problems_panel_widget_and_columns(qapp: QApplication) -> None:
+def test_problems_panel_widget_and_columns() -> None:
     """Verify ProblemsPanel header, tree columns, severity icons/words, and click signal."""
-    panel = ProblemsPanel()
-    assert panel.title_label.text() == "Problems"
-    assert panel.close_btn is not None
+    script = """
+import sys
+from PySide6.QtWidgets import QApplication
+from circuitsim.app.problems_panel import ProblemsPanel
+from circuitsim.engine.simulation_session import ProblemDiagnostic
 
-    diags = [
-        ProblemDiagnostic(
-            code="no_ground",
-            severity="error",
-            message="No ground connected: circuit requires reference; Add a Ground part",
-            component_names=("V1", "R1"),
-        ),
-        ProblemDiagnostic(
-            code="led_over_current",
-            severity="warning",
-            message="LED D1 over-current: current 35 mA exceeds max 30 mA; increase resistor",
-            component_names=("D1",),
-        ),
-    ]
+app = QApplication.instance() or QApplication([])
+panel = ProblemsPanel()
+assert panel.title_label.text() == "Problems"
+assert panel.close_btn is not None
 
-    panel.update_diagnostics(diags)
-    assert panel.count_label.text() == "(2)"
-    assert panel.tree.topLevelItemCount() == 2
+diags = [
+    ProblemDiagnostic(
+        code="no_ground",
+        severity="error",
+        message="No ground connected: circuit requires reference; Add a Ground part",
+        component_names=("V1", "R1"),
+    ),
+    ProblemDiagnostic(
+        code="led_over_current",
+        severity="warning",
+        message="LED D1 over-current: current 35 mA exceeds max 30 mA; increase resistor",
+        component_names=("D1",),
+    ),
+]
 
-    item0 = panel.tree.topLevelItem(0)
-    assert item0.text(0) == "Error"
-    assert "No ground connected" in item0.text(1)
-    assert "V1, R1" in item0.text(2)
-    assert not item0.icon(0).isNull()
+panel.update_diagnostics(diags)
+assert panel.count_label.text() == "(2)"
+assert panel.tree.topLevelItemCount() == 2
 
-    item1 = panel.tree.topLevelItem(1)
-    assert item1.text(0) == "Warning"
-    assert "LED D1 over-current" in item1.text(1)
-    assert "D1" in item1.text(2)
-    assert not item1.icon(0).isNull()
+item0 = panel.tree.topLevelItem(0)
+assert item0.text(0) == "Error"
+assert "No ground connected" in item0.text(1)
+assert "V1, R1" in item0.text(2)
+assert not item0.icon(0).isNull()
 
-    # Test click activation signal
-    activated_parts: list[str] = []
-    panel.problem_activated.connect(activated_parts.append)
-    panel._on_item_clicked(item1, 0)
-    assert activated_parts == ["D1"]
+item1 = panel.tree.topLevelItem(1)
+assert item1.text(0) == "Warning"
+assert "LED D1 over-current" in item1.text(1)
+assert "D1" in item1.text(2)
+assert not item1.icon(0).isNull()
 
-    # Test close button signal
-    close_emitted = False
+# Test click activation signal
+activated_parts = []
+panel.problem_activated.connect(activated_parts.append)
+panel._on_item_clicked(item1, 0)
+assert activated_parts == ["D1"]
 
-    def on_close():
-        nonlocal close_emitted
-        close_emitted = True
+# Test close button signal
+close_emitted = False
 
-    panel.close_requested.connect(on_close)
-    panel.close_btn.click()
-    assert close_emitted is True
+def on_close():
+    global close_emitted
+    close_emitted = True
+
+panel.close_requested.connect(on_close)
+panel.close_btn.click()
+assert close_emitted is True
+"""
+    proc = _run_qt_script(script)
+    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
 
 
 def test_structured_diagnostics_what_why_how() -> None:
@@ -117,18 +127,6 @@ def test_structured_diagnostics_what_why_how() -> None:
     assert "is floating" in diag_float.message
     assert "no DC path to ground" in diag_float.message
     assert "tied to ground" in diag_float.message
-
-
-def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=25,
-    )
 
 
 def test_offscreen_problems_panel_integration_and_canvas_invariance() -> None:

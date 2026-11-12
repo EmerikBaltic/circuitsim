@@ -387,7 +387,7 @@ class CircuitView(QGraphicsView):
 
         if len(selected_comps) == 1:
             target_comp = selected_comps[0]
-            act_edit = QAction("Edit Values...\tDouble-Click", menu)
+            act_edit = QAction("Properties...\tDouble-Click", menu)
             act_edit.triggered.connect(
                 lambda: self.open_quick_edit_for_item(target_comp)
             )

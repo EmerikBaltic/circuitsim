@@ -14,7 +14,40 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done (247 Passing Tests)
+## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle & Problems Panel Complete (272 Passing Tests)
+
+## LED Component & Problems Panel (Items 1–6)
+- **Item 1: LED Symbol and Palette**:
+  - Added new palette category **Semiconductors** with **LED** (`80 x 40 px`, terminals `anode` at `(0, 20)` and `cathode` at `(80, 20)`).
+  - Designed IEC 60617 LED symbol with distinct cathode flat cut on the case outline (Variant A: flat vertical cut on cathode rim, clear across all 8 orientations).
+  - Pure-Python geometric marks in `led_marks()` with verified cathode-flat proximity tests.
+  - Preview image generated and committed at `docs/design/led_variants.png`.
+- **Item 2: Colour Selection & Datasheet Forward Voltages**:
+  - Integrated LED color selector into `QuickValueDialog` with 7 real-world presets + Custom: Red (2.0 V), Orange (2.0 V), Yellow (2.1 V), Green (2.2 V), Pure green (3.0 V), Blue (3.2 V), White (3.2 V).
+  - Swatch icons rendered beside each colour choice in the combo box.
+  - Informative datasheet label ("typical datasheet values; real LEDs vary by about +-0.3 V") that auto-switches to "Custom" on manual voltage edits.
+  - Configurable `rated_current` (default 20 mA), `max_current` (default 30 mA), and optional `burnout_enabled` / `burnout_current` checkbox and threshold.
+  - Full undo/redo support and `.circ` document serialization.
+- **Item 3: LED Drawing & Perceptual Glow**:
+  - Live brightness follows perceptual human-eye response: $I_{\text{vis}} = \sqrt{I / I_{\text{rated}}}$.
+  - Realistic sharp sub-threshold cutoff below $10\,\mu\text{A}$ (off).
+  - Over-current warning badge: amber exclamation mark badge rendered when $I > I_{\text{max}}$.
+  - Burnout rendering: darkened case body with distinct cross when burned out ($I > I_{\text{burnout}}$).
+  - Diagnostic outline coloring: amber box for warnings (reversed, over-current, missing resistor) and red box for fatal errors.
+  - Live tooltip shows Name, Colour, Voltage, Current, and State (`Off`, `On`, `Over-current`, `Burned out`, `Reverse-biased`).
+- **Item 4: Problems Panel (`View > Problems` / `F8`)**:
+  - Bottom panel dock with fixed 120 px initial height, 'X' close button, and `F8` shortcut.
+  - Diagnostics restructured into clear 3-part format: What happened, Why it happened, and How to fix it (referencing component names and numbers).
+  - Tree columns: Severity (icon + "Error"/"Warning"), Message, Components affected.
+  - Clicking a problem selects and centers the affected component on the canvas.
+  - Status bar shows short problem count ("2 problems") with clickable action.
+  - Auto-opens on simulation errors unless closed by the user during the current run.
+  - Strict canvas invariance guaranteed (`NoAnchor` view prevents zoom or pan shift on panel open/close).
+- **Item 5: Bundled LED Examples**:
+  - `File > Examples > LED with a resistor`: 5 V DC source, 150 Ω resistor, Red LED (calculating $I = 20\text{ mA}$).
+  - `File > Examples > LED colours`: 12 V rail powering 7 parallel branches showcasing all standard LED colours with calculated current-limiting resistors.
+- **Item 6: Integration Tests & Documentation**:
+  - Offscreen Qt integration test suite with timeout verifying palette placement, snapping, properties editing with undo/redo, reversed/no-resistor diagnostics, problems panel interaction, all 8 orientations, and `.circ` save/load round-tripping.
 
 ## Startup & Shutdown Bug Fixes (Items 1–6)
 - **Bug (a) Empty Start Canvas**:
@@ -215,6 +248,6 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (190 tests)
+# Run the full test suite (272 tests)
 .\.venv\Scripts\pytest.exe
 ```

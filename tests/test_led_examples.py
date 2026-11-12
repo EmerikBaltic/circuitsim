@@ -9,20 +9,10 @@ import subprocess
 import sys
 import pytest
 
-from PySide6.QtWidgets import QApplication
-
 from circuitsim.canvas.connectivity import extract_connectivity
 from circuitsim.components import LED
 from circuitsim.engine.solver import MNASolver
 from circuitsim.io.circ_serializer import load_document
-
-
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
 
 
 def test_led_with_resistor_analytical() -> None:
