@@ -597,3 +597,49 @@ win.close()
 """
     res = _run_qt(script)
     assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+
+
+def test_fresh_window_starts_empty_and_clean_with_no_close_prompt() -> None:
+    """Item 1: A new MainWindow starts with zero items, clean undo stack,
+
+    no asterisk in title, not modified, and closing it shows no prompt.
+    """
+    script = """
+import sys
+from PySide6.QtWidgets import QApplication
+from circuitsim.app.main_window import MainWindow
+
+app = QApplication.instance() or QApplication(sys.argv)
+win = MainWindow()
+
+# 1. Zero parts, zero wires, zero junctions
+assert len(win.circuit_scene.placed_items) == 0, f"Expected 0 items, got {len(win.circuit_scene.placed_items)}"
+assert len(win.circuit_scene.placed_wires) == 0, f"Expected 0 wires, got {len(win.circuit_scene.placed_wires)}"
+assert len(win.circuit_scene._explicit_junctions) == 0, "Expected 0 junctions"
+
+# 2. Clean undo stack
+undo_stack = win.circuit_scene.undo_stack
+assert not undo_stack.canUndo(), "Fresh window must not have canUndo"
+assert not undo_stack.canRedo(), "Fresh window must not have canRedo"
+assert undo_stack.isClean(), "Fresh window undo stack must be clean"
+
+# 3. Title has no asterisk and mentions Untitled
+title = win.windowTitle()
+assert "*" not in title, f"Title should not have asterisk: {title}"
+assert "Untitled" in title, f"Title should have Untitled: {title}"
+
+# 4. Window is not modified
+assert not win.has_unsaved_changes(), "Fresh window must not have unsaved changes"
+
+# 5. Closing it shows no prompt (assert prompt function was never called)
+prompt_called = []
+win._ask_save_discard_cancel = lambda what: prompt_called.append(what)
+win.close()
+assert prompt_called == [], f"Prompt function was unexpectedly called: {prompt_called}"
+
+print("ITEM1_OK")
+"""
+    res = _run_qt(script)
+    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "ITEM1_OK" in res.stdout
+

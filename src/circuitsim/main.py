@@ -13,8 +13,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-from PySide6.QtCore import QPointF
-
 from circuitsim.components import (
     ACVoltageSource,
     Ammeter,
@@ -100,16 +98,6 @@ def run_gui() -> int:
     install_global_exception_hook()
     app = QApplication.instance() or QApplication(sys.argv)
     window = MainWindow()
-
-    # Place a few sample IEC components on the grid so the user can immediately
-    # see and interact with the schematic canvas on launch.
-    scene = window.circuit_scene
-    scene.place_new_component("dc_voltage", QPointF(-160.0, -40.0))
-    scene.place_new_component("switch", QPointF(-40.0, -40.0))
-    scene.place_new_component("resistor", QPointF(80.0, -40.0))
-    scene.place_new_component("lightbulb", QPointF(200.0, -40.0))
-    scene.place_new_component("ground", QPointF(0.0, 60.0))
-
     window.show()
     return app.exec()
 
