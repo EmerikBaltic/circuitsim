@@ -14,13 +14,13 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## HYDROGEN QUEUE (Last Commit: phase-1.1)
+## HYDROGEN QUEUE (Last Commit: phase-1.2)
 ### Phase 0: Verify
 - [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
 
 ### Phase 1: Deprecation Warnings (on `main`)
 - [x] 1.1 Replace deprecated Qt calls (`event.pos()`, `globalPos()`, `x()`, `y()`, etc.) across `src/` with Qt 6 API (`position().toPoint()`, etc.) - *done*
-- [ ] 1.2 Add `filterwarnings = ["error::DeprecationWarning:circuitsim.*"]` to `pyproject.toml`, list third-party warnings, add filter test - *todo*
+- [x] 1.2 Add `filterwarnings = ["error::DeprecationWarning:circuitsim.*"]` to `pyproject.toml`, list third-party warnings, add filter test - *done (0 third-party warnings remain; 291 passed in 26.32s)*
 
 ### Phase 2: Rename to Ohmbench, Stage 1 (on `main`)
 - [ ] 2.1 Rename Inventory in `PROGRESS.md` - *todo*

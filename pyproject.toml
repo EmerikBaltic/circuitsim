@@ -33,6 +33,7 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-v"
+filterwarnings = ["error::DeprecationWarning:circuitsim.*"]
 markers = [
     "slow: marks tests taking more than 3 seconds (deselect with '-m \"not slow\"')",
 ]
