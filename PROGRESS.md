@@ -284,6 +284,17 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 # Run the headless Milestone 1 engine demo
 .\.venv\Scripts\python.exe -m circuitsim.main --demo
 
-# Run the full test suite (277 tests)
-.\.venv\Scripts\pytest.exe
+# Run the full test suite (290 tests)
+.\.venv\Scripts\python.exe -m pytest
+
+# Run the fast test subset (excludes @pytest.mark.slow tests > 3s)
+.\.venv\Scripts\python.exe -m pytest -m "not slow"
 ```
+
+### Test Suite Speedup & Widget Audit (290 Tests)
+- **Widget & Icon Scan**: Added `test_no_blank_buttons_or_icons_in_both_themes` in [`tests/test_problems_panel.py`](tests/test_problems_panel.py) scanning `MainWindow` buttons, `ProblemsPanel`, `make_severity_icon`, menu icons, `QuickValueDialog`, `PreferencesDialog`, and `ExportOptionsDialog` in both Dark and Light themes.
+- **In-Process Shared Offscreen `QApplication` (`tests/conftest.py`)**: Replaced ~50 per-test Qt subprocess launches with one session-scoped `qapp` fixture (`QT_QPA_PLATFORM=offscreen`), per-test widget/timer/worker/`crash_handler` teardown, and a 30 s hang watchdog (`faulthandler.dump_traceback_later` + `threading.Timer`). Switched pixel-by-pixel `QImage.pixelColor()` loops to vectorized NumPy buffer checks.
+- **Why Subprocesses Remain Where Used**:
+  - Qt-free module import checks (`circuitsim.engine`, `circuitsim.components`, `circuitsim.canvas.connectivity`, `circuitsim.wiring`, `circuitsim.io.circ_serializer`, `circuitsim.engine.simulation_session`) run in clean subprocesses via `assert_module_has_no_qt_imports` so `PySide6` is guaranteed absent from `sys.modules`.
+  - The `1024x768` toolbar `speed_combo` visibility check in `test_qt_step2c_ui_responsiveness_upright_labels_speed_dropdown_and_quick_edit` runs in a clean native-QPA subprocess because Qt's `offscreen` fallback font inflates the toolbar `sizeHint` width (~1748 px vs ~1042 px on Windows).
+- **Runtime**: Full suite reduced from **150.86s** to **35.01s** (`290 passed`); fast subset `pytest -m "not slow"` runs in **23.22s** (`289 passed, 1 deselected`).

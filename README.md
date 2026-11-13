@@ -83,8 +83,16 @@ python -m venv .venv
 
 ### 3. Run the Unit Test Suite
 
+Run all 290 tests (uses a shared offscreen `QApplication` for Qt tests and clean subprocesses for Qt-free module import checks so `sys.modules` is verified without Qt already loaded):
+
 ```powershell
-.\.venv\Scripts\pytest.exe
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Run the fast subset (excludes `@pytest.mark.slow` tests taking over 3 seconds, such as the 1,000-exception crash-handler deduplication test):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m "not slow"
 ```
 
 ### 4. Run the Application / Engine Demo
