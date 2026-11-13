@@ -23,7 +23,7 @@ This directory holds **IEC 60617** schematic symbols (e.g., rectangular resistor
 2. The SVG loader is tolerant of Inkscape/Figma/Sodipodi exports:
    - It automatically strips `<metadata>`, `<sodipodi:namedview>`, `<defs>` editor cruft, and any full-artboard background `<rect>` covering the entire `80x40` (or `40x40`) canvas.
    - It recolours `#000000`, `black`, `rgb(0,0,0)`, and `currentColor` to the active theme's foreground color (`#E6EDF3` in Dark Theme, `#1F2328` in Light Theme).
-   - If an SVG file has malformed XML or its `viewBox` dimensions do not match `grid_size * 20`, CircuitSim logs a clear warning and falls back to the built-in procedural IEC symbol without crashing.
+   - If an SVG file has malformed XML or its `viewBox` dimensions do not match `grid_size * 20`, Ohmbench logs a clear warning and falls back to the built-in procedural IEC symbol without crashing.
 
 ## Previewing Your Symbols
 

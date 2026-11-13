@@ -1,4 +1,4 @@
-# Project Progress — CircuitSim
+# Project Progress — Ohmbench (formerly CircuitSim)
 
 ## FLASH QUEUE
 - Phase 1 Task 1: Housekeeping (.gitignore, switch breakdown voltage hint, label collision avoidance) - [done]
@@ -14,7 +14,7 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## HYDROGEN QUEUE (Last Commit: phase-2.5)
+## HYDROGEN QUEUE (Last Commit: phase-2.6)
 ### Phase 0: Verify
 - [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
 
@@ -28,7 +28,7 @@
 - [x] 2.3 App Identity (`QCoreApplication` org/app = Ohmbench, one-time migration from `python`, Windows `AppUserModelID`) - *done*
 - [x] 2.4 Stored Data (`.circ` backward compatibility and format identifier choice) - *done*
 - [x] 2.5 Tests (verify user-visible strings use `APP_NAME`, list legitimate old-name strings) - *done*
-- [ ] 2.6 Docs (`README.md`, docs, `"Formerly CircuitSim"`, Stage 2 plan in `PROGRESS.md`) - *todo*
+- [x] 2.6 Docs (`README.md`, docs, `"Formerly CircuitSim"`, Stage 2 plan in `PROGRESS.md`) - *done*
 
 ### Phase 3: Mutation Check (on `main`)
 - [ ] 3a Component empty value plate mutation vs LED stray-background test - *todo*
@@ -380,3 +380,19 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 - `tests/test_simulation_session_and_step2c.py`: Benchmark env var `CIRCUITSIM_MAX_UI_GAP_MS`.
 - `tests/test_deprecation_filter.py`: Test warning emitter `module="circuitsim.x"` matching `circuitsim.*` package filter.
 - `tests/test_phase1_quick_wins.py`: Historical docstring reference (`'About CircuitSim'`) in `test_task7_about_feedback_and_crash_log`, and package path imports `circuitsim.*`.
+
+### Stage 2 Rename Plan & Risks (Phase 2.6)
+When ready to perform Stage 2 (internal/package rename after Stage 1 settles):
+1. **Python Package Rename (`src/circuitsim/` -> `src/ohmbench/`)**:
+   - Move `src/circuitsim` to `src/ohmbench` (`git mv`) and update all imports across `src/` and `tests/`.
+   - Keep a temporary compatibility shim or clean deprecation period if external scripts import `circuitsim`? Better: clean atomic rename once `wire-redesign` branch is merged to avoid merge conflicts across branches.
+2. **Packaging & CLI Entry Point (`pyproject.toml`)**:
+   - Rename `[project].name` to `"ohmbench"`, `[tool.setuptools.package-data]` key to `"ohmbench"`, `[project.scripts]` entry point to `ohmbench = "ohmbench.main:run_demo"` (optionally keeping `circuitsim` alias temporarily), and pytest `filterwarnings = ["error::DeprecationWarning:ohmbench.*"]`.
+   - Re-run `pip install -e .` in `.venv` so `importlib.metadata.version("ohmbench")` resolves cleanly and stale `circuitsim.egg-info` is removed.
+3. **GitHub Repository & Remote URLs**:
+   - Rename GitHub repo from `EmerikBaltic/circuitsim` to `EmerikBaltic/ohmbench` (GitHub automatically redirects old web/clone URLs) and update local `git remote set-url origin ...`.
+   - Update clone instructions in `README.md`, MIME type (`application/x-ohmbench-component-id`), and env var alias (`CIRCUITSIM_DATA_DIR` -> `OHMBENCH_DATA_DIR` as primary, keeping old fallback).
+4. **Risks & Mitigations**:
+   - **Risk 1 — Merge Conflicts Across Active Feature Branches**: Renaming `src/circuitsim/` touches every Python file. *Mitigation*: Only perform Stage 2 when `wire-redesign` (and any other open branches) have been merged to `main`.
+   - **Risk 2 — Stale `.venv` Editable Install / `.egg-info`**: Editable installs cache the old package name until `pip install -e .` is re-run, causing `ModuleNotFoundError` or stale package metadata. *Mitigation*: Include `pip uninstall -y circuitsim && pip install -e .[dev]` in the Stage 2 checklist and CI.
+   - **Risk 3 — Drag-and-Drop / Saved `.circ` Compatibility**: Changing `MIME_COMPONENT_ID` mid-session isn't persistent, whereas `.circ` `"format"` IS persistent; keep `ACCEPTED_FORMAT_NAMES = ("circuitsim", "ohmbench")` indefinitely so user files never break.

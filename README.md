@@ -1,8 +1,8 @@
-# CircuitSim — Desktop Electrical Circuit Simulator
+# Ohmbench — Desktop Electrical Circuit Simulator
 
-[![CI](https://github.com/EmerikBaltic/circuitsim/actions/workflows/ci.yml/badge.svg)](https://github.com/EmerikBaltic/circuitsim/actions/workflows/ci.yml)
+[![CI](https://github.com/EmerikBaltic/ohmbench/actions/workflows/ci.yml/badge.svg)](https://github.com/EmerikBaltic/ohmbench/actions/workflows/ci.yml)
 
-**CircuitSim** is an open-source, educational desktop electrical circuit simulator built with **Python 3.11+**, **NumPy / SciPy** (Modified Nodal Analysis physics engine), and **PySide6 (Qt 6 Widgets)**.
+**Ohmbench** is an open-source, educational desktop electrical circuit simulator built with **Python 3.11+**, **NumPy / SciPy** (Modified Nodal Analysis physics engine), and **PySide6 (Qt 6 Widgets)**.
 
 It is designed for electrical engineering students and hobbyists who want both an interactive schematic capture + virtual instrument bench and a clean, readable Python codebase that demonstrates how real circuit simulators (like SPICE) work under the hood.
 
@@ -47,9 +47,9 @@ Circuits are stored as `.circ` files (plain JSON text that you can open in any e
 - **Zoom to Fit**: `View > Zoom to fit` (`Ctrl+0`) frames the whole circuit cleanly.
 - **Preferences**: `Edit > Preferences` configures regional decimal number formatting (Auto, Dot, Comma) and default newly-placed meter behavior (Ideal, Realistic).
 - **Help & Diagnostics**: `Help > About` displays software and platform versions, while unhandled crashes are logged safely to the user app-data folder.
-- The window title shows the file name and an asterisk (`*`) when there are unsaved changes. CircuitSim asks before New, Open or closing if you would lose changes.
+- The window title shows the file name and an asterisk (`*`) when there are unsaved changes. Ohmbench asks before New, Open or closing if you would lose changes.
 - Saving is safe: the file is written to a temporary file first and only then swapped in, and the previous version is kept as `yourfile.circ.bak`.
-- A damaged, empty or unknown file (or one made by a newer CircuitSim) shows a friendly message and leaves your current circuit untouched.
+- A damaged, empty or unknown file (or one made by a newer Ohmbench) shows a friendly message and leaves your current circuit untouched.
 - Saved with the file: parts, values, labels, rotation/flip, wires, junction dots, theme, zoom, view position and simulation speed.
 
 ---
@@ -118,7 +118,7 @@ Run the fast subset (excludes `@pytest.mark.slow` tests taking over 3 seconds, s
 ## Project Structure
 
 ```text
-CircuitSim/
+Ohmbench/
 ├── LICENSE
 ├── README.md
 ├── PROGRESS.md
@@ -145,6 +145,10 @@ CircuitSim/
 
 ## Licensing & Third-Party Libraries
 
-- **CircuitSim** is released under the [MIT License](LICENSE).
+- **Ohmbench** is released under the [MIT License](LICENSE).
 - **PySide6 (Qt for Python)** is licensed under the **LGPLv3**.
 - **NumPy** and **SciPy** are licensed under the **BSD 3-Clause License**.
+
+---
+
+*Formerly CircuitSim.*
