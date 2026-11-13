@@ -215,7 +215,8 @@ class CircuitView(QGraphicsView):
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        scene_pt: QPointF = self.mapToScene(event.pos())
+        event_pos = event.position().toPoint()
+        scene_pt: QPointF = self.mapToScene(event_pos)
         self._last_scene_pos = scene_pt
         self._pressed_switch_item = None
 
@@ -224,7 +225,7 @@ class CircuitView(QGraphicsView):
             event.button() == Qt.MouseButton.LeftButton and self._space_held
         ):
             self._is_panning = True
-            self._pan_start = event.pos()
+            self._pan_start = event_pos
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
@@ -267,13 +268,14 @@ class CircuitView(QGraphicsView):
 
             # Prepare for component selection / drag-move
             self.circuit_scene.begin_component_move_tracking()
-            self._left_press_pos = event.pos()
+            self._left_press_pos = event_pos
             self._drag_threshold_reached = False
 
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        scene_pt: QPointF = self.mapToScene(event.pos())
+        event_pos = event.position().toPoint()
+        scene_pt: QPointF = self.mapToScene(event_pos)
         self._last_scene_pos = scene_pt
         sx, sy = snap_to_grid(scene_pt.x(), scene_pt.y(), GRID_PITCH_PX)
         gx = int(round(sx / GRID_PITCH_PX))
@@ -281,8 +283,8 @@ class CircuitView(QGraphicsView):
         self.cursor_grid_moved.emit(sx, sy, gx, gy)
 
         if self._is_panning:
-            delta = event.pos() - self._pan_start
-            self._pan_start = event.pos()
+            delta = event_pos - self._pan_start
+            self._pan_start = event_pos
             self.horizontalScrollBar().setValue(
                 self.horizontalScrollBar().value() - delta.x()
             )
@@ -305,7 +307,7 @@ class CircuitView(QGraphicsView):
             and hasattr(self, "_left_press_pos")
             and not self._drag_threshold_reached
         ):
-            if (event.pos() - self._left_press_pos).manhattanLength() < 4:
+            if (event_pos - self._left_press_pos).manhattanLength() < 4:
                 event.accept()
                 return
             self._drag_threshold_reached = True
@@ -314,7 +316,7 @@ class CircuitView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        scene_pt: QPointF = self.mapToScene(event.pos())
+        scene_pt: QPointF = self.mapToScene(event.position().toPoint())
         self._last_scene_pos = scene_pt
 
         if hasattr(self, "_left_press_pos"):
@@ -356,7 +358,7 @@ class CircuitView(QGraphicsView):
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """Open the Quick Value Dialog when double-clicking a component (Addition #1)."""
         if event.button() == Qt.MouseButton.LeftButton:
-            scene_pt = self.mapToScene(event.pos())
+            scene_pt = self.mapToScene(event.position().toPoint())
             self._pressed_switch_item = None
             hit_item = self.circuit_scene.itemAt(scene_pt, self.transform())
             if isinstance(hit_item, ComponentItem):

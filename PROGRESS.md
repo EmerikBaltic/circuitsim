@@ -14,6 +14,48 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
+## HYDROGEN QUEUE (Last Commit: phase-1.1)
+### Phase 0: Verify
+- [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
+
+### Phase 1: Deprecation Warnings (on `main`)
+- [x] 1.1 Replace deprecated Qt calls (`event.pos()`, `globalPos()`, `x()`, `y()`, etc.) across `src/` with Qt 6 API (`position().toPoint()`, etc.) - *done*
+- [ ] 1.2 Add `filterwarnings = ["error::DeprecationWarning:circuitsim.*"]` to `pyproject.toml`, list third-party warnings, add filter test - *todo*
+
+### Phase 2: Rename to Ohmbench, Stage 1 (on `main`)
+- [ ] 2.1 Rename Inventory in `PROGRESS.md` - *todo*
+- [ ] 2.2 Single source of truth `src/circuitsim/app_info.py` (no Qt) and user-visible strings - *todo*
+- [ ] 2.3 App Identity (`QCoreApplication` org/app = Ohmbench, one-time migration from `python`, Windows `AppUserModelID`) - *todo*
+- [ ] 2.4 Stored Data (`.circ` backward compatibility and format identifier choice) - *todo*
+- [ ] 2.5 Tests (verify user-visible strings use `APP_NAME`, list legitimate old-name strings) - *todo*
+- [ ] 2.6 Docs (`README.md`, docs, `"Formerly CircuitSim"`, Stage 2 plan in `PROGRESS.md`) - *todo*
+
+### Phase 3: Mutation Check (on `main`)
+- [ ] 3a Component empty value plate mutation vs LED stray-background test - *todo*
+- [ ] 3b Problems panel close button blank draw mutation vs blank-button test - *todo*
+- [ ] 3c Light theme palette missing attribute mutation vs palette test - *todo*
+- [ ] 3d Swap LED anode/cathode terminals vs LED symbol test - *todo*
+- [ ] 3e Unguarded `paint()` exception vs paint safety test - *todo*
+
+### Phase 4: Wire Redesign, Step 4A-1 (branch `wire-redesign`)
+- [ ] 4.1 Scene state (`WireGraph`) and undo/redo + move merge + `add_wire` between attachments - *todo*
+- [ ] 4.2 Display (`WireItem` using `route()`, `JunctionItem` degree >= 3, `FreeEnd` hollow marker, 10 px hit stroke, wire tool notice) - *todo*
+- [ ] 4.3 Netlist (`circuitsim.wiring.netlist`) and diagnostics (including `FreeEnd` amber note) - *todo*
+- [ ] 4.4 Moving, rotating, flipping, deleting (100 random ops + S1 + S2) - *todo*
+- [ ] 4.5 Save and load schema v2 + v1 migration - *todo*
+- [ ] 4.6 Existing features that touch wires (examples, export, labels, tooltips, zoom-to-fit, recent/dirty/undo) - *todo*
+- [ ] CHECKPOINT 4A-1 DONE - *todo*
+
+### Phase 5: Wire Tool, Step 4A-2 (branch `wire-redesign`)
+- [ ] 5.1 Wire drawing tool re-enabled (live preview, 10 px snap, `JunctionRef`, `FreeEnd`, wire-on-wire notice) - *todo*
+- [ ] 5.2 Rejections (same terminal, duplicate wire, zero-length wire) - *todo*
+- [ ] 5.3 Editing wire ends (Acceptance S3: handle, detach, reattach/free-end, 1 undo step) - *todo*
+- [ ] 5.4 Synthetic mouse tests (`QTest`, shared `qapp`) - *todo*
+- [ ] 5.5 Performance benchmark (`route()` + 50-part drag step <= ~30 ms, configurable threshold test) - *todo*
+
+### Phase 6: Documentation & Report (branch `wire-redesign`)
+- [ ] 6.1 Update `PROGRESS.md` (built, rewritten tests, next tasks S4/S5) and `README.md` if usage changed - *todo*
+
 ## Current Status: Milestone 2 & Milestone 3 Step 3A Complete, Phase 1 Quick Wins Tasks 1-10 Done, Startup & Shutdown Fixes Done, LED Lifecycle Complete, Paint Safety & Crash Handler Hardening Complete, Meter Loading & Ideal Modes Complete (289 Passing Tests)
 
 ## Stray Background Under LED, Problems Panel Close Button & Meter Loading (Items 1–3)
