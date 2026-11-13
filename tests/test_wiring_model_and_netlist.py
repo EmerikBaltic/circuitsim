@@ -43,19 +43,16 @@ from circuitsim.wiring import (
 )
 
 
+from conftest import assert_module_has_no_qt_imports
+
+
 def test_no_qt_imports_in_wiring_package() -> None:
     """Explicit wiring package must have zero PySide6/Qt imports."""
-    import circuitsim.wiring.model
-    import circuitsim.wiring.netlist
-    import circuitsim.wiring
-
-    qt_mods = [m for m in sys.modules if "PySide6" in m or "PyQt" in m]
-    # If Qt was imported earlier by another test runner step in this process,
-    # ensure our wiring modules don't reference it.
-    for mod in (circuitsim.wiring.model, circuitsim.wiring.netlist, circuitsim.wiring):
-        assert not hasattr(mod, "QPointF")
-        assert not hasattr(mod, "QGraphicsItem")
-        assert not hasattr(mod, "QtCore")
+    assert_module_has_no_qt_imports(
+        "circuitsim.wiring",
+        "circuitsim.wiring.model",
+        "circuitsim.wiring.netlist",
+    )
 
 
 def test_wiregraph_immutability() -> None:

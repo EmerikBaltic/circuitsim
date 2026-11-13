@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import math
 import os
-import subprocess
 import sys
 
 import pytest
+
+from conftest import assert_module_has_no_qt_imports
 
 from circuitsim.canvas.connectivity import (
     PlacedComponentSpec,
@@ -391,452 +392,375 @@ def test_backup_keeps_previous_version(tmp_path) -> None:
 
 
 # ----------------------------------------------------------------------
-# Qt tests (subprocess so pytest itself never imports PySide6)
+# Qt tests (in-process via shared offscreen QApplication; serializer Qt-freedom checked in subprocess)
 # ----------------------------------------------------------------------
 
 
-def _run_qt(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True, text=True, check=False, env=env,
-    )
-
-
 def test_no_qt_in_serializer_module() -> None:
-    res = subprocess.run(
-        [sys.executable, "-c",
-         "import sys, circuitsim.io.circ_serializer; "
-         "assert not [m for m in sys.modules if m.startswith('PySide6')]"],
-        capture_output=True, text=True, check=False,
-    )
-    assert res.returncode == 0, res.stderr
+    assert_module_has_no_qt_imports("circuitsim.io.circ_serializer")
 
 
-_QT_PRELUDE = """
-import sys, os, json, tempfile, math
-from pathlib import Path
-from PySide6.QtCore import QPointF
-from PySide6.QtWidgets import QApplication, QMessageBox
-from circuitsim.app.main_window import MainWindow
+def _new_test_window():
+    from PySide6.QtCore import QPointF
+    from circuitsim.app.main_window import MainWindow
 
-app = QApplication(sys.argv)
-win = MainWindow()
-errors = []
-win._show_error = lambda title, text: errors.append(text)
-scene = win.circuit_scene
-tmp = Path(tempfile.mkdtemp())
+    win = MainWindow()
+    errors: list[str] = []
+    win._show_error = lambda title, text: errors.append(text)
+    scene = win.circuit_scene
 
-def build_divider():
-    # 12 V, R1 = 1k (horizontal), R2 = 3k (vertical), same geometry as the engine tests
-    scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
-    scene.place_new_component("resistor", QPointF(60, -40))
-    r2 = scene.place_new_component("resistor", QPointF(120, 0), rotation_deg=90)
-    scene.place_new_component("ground", QPointF(0, 60))
-    scene.add_wire([(0, -40), (20, -40)])
-    scene.add_wire([(100, -40), (120, -40)])
-    scene.add_wire([(0, 40), (120, 40)])
-    scene.edit_component_parameters(r2, {"resistance": 3000.0})
-    return r2
-"""
+    def build_divider():
+        scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+        scene.place_new_component("resistor", QPointF(60, -40))
+        r2 = scene.place_new_component("resistor", QPointF(120, 0), rotation_deg=90)
+        scene.place_new_component("ground", QPointF(0, 60))
+        scene.add_wire([(0, -40), (20, -40)])
+        scene.add_wire([(100, -40), (120, -40)])
+        scene.add_wire([(0, 40), (120, 40)])
+        scene.edit_component_parameters(r2, {"resistance": 3000.0})
+        return r2
+
+    return win, errors, scene, build_divider
 
 
-def test_window_save_open_roundtrip_title_and_clean_state() -> None:
+def test_window_save_open_roundtrip_title_and_clean_state(tmp_path, qapp) -> None:
     """Save from a real window, open in a fresh window, check volts by hand: 12 * 3/4 = 9 V."""
-    script = _QT_PRELUDE + """
-r2 = build_divider()
-assert win.windowTitle().startswith("Untitled*"), win.windowTitle()
-assert win.has_unsaved_changes()
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.engine import MNASolver
 
-path = tmp / "divider.circ"
-assert win.save_to_path(path) is True
-assert win.windowTitle().startswith("divider.circ") and "*" not in win.windowTitle(), win.windowTitle()
-assert not win.has_unsaved_changes()
+    win, errors, scene, build_divider = _new_test_window()
+    r2 = build_divider()
+    assert win.windowTitle().startswith("Untitled*"), win.windowTitle()
+    assert win.has_unsaved_changes()
 
-# any edit marks the file as modified again (asterisk), undo returns to clean
-scene.edit_component_parameters(r2, {"resistance": 1000.0})
-assert "*" in win.windowTitle()
-scene.undo_stack.undo()
-assert "*" not in win.windowTitle()
-win.circuit_scene.undo_stack.setClean()
-win.close()
+    path = tmp_path / "divider.circ"
+    assert win.save_to_path(path) is True
+    assert win.windowTitle().startswith("divider.circ") and "*" not in win.windowTitle(), win.windowTitle()
+    assert not win.has_unsaved_changes()
 
-# fresh window, open the file
-win2 = MainWindow()
-win2._show_error = lambda t, m: errors.append(m)
-assert win2.open_path(path) is True and errors == []
-assert win2.windowTitle().startswith("divider.circ") and "*" not in win2.windowTitle()
-assert not win2.circuit_scene.undo_stack.canUndo()  # loading clears undo history
-names = sorted(i.component.name for i in win2.circuit_scene.placed_items)
-assert names == ["GND1", "R1", "R2", "V1"], names
+    scene.edit_component_parameters(r2, {"resistance": 1000.0})
+    assert "*" in win.windowTitle()
+    scene.undo_stack.undo()
+    assert "*" not in win.windowTitle()
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
 
-conn = win2.circuit_scene.extract_connectivity_result()
-from circuitsim.engine import MNASolver
-sol = MNASolver(conn.circuit).solve_dc()
-v_mid = sol.node_voltages[conn.component_nodes["R2"]["a"]]
-assert abs(v_mid - 9.0) < 1e-6, v_mid          # 12 V * 3k / 4k
-r1 = next(i for i in win2.circuit_scene.placed_items if i.component.name == "R1")
-assert r1.component.resistance == 1000.0
-r2b = next(i for i in win2.circuit_scene.placed_items if i.component.name == "R2")
-assert r2b.component.resistance == 3000.0 and r2b.rotation_deg == 90
-# a new wire after loading must not reuse an old wire id
-old_ids = {w.wire_id for w in win2.circuit_scene.placed_wires}
-assert win2.circuit_scene.next_wire_id() not in old_ids
-win2.circuit_scene.undo_stack.setClean()
-win2.close()
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    win2 = MainWindow()
+    win2._show_error = lambda t, m: errors.append(m)
+    assert win2.open_path(path) is True and errors == []
+    assert win2.windowTitle().startswith("divider.circ") and "*" not in win2.windowTitle()
+    assert not win2.circuit_scene.undo_stack.canUndo()
+    names = sorted(i.component.name for i in win2.circuit_scene.placed_items)
+    assert names == ["GND1", "R1", "R2", "V1"], names
+
+    conn = win2.circuit_scene.extract_connectivity_result()
+    sol = MNASolver(conn.circuit).solve_dc()
+    v_mid = sol.node_voltages[conn.component_nodes["R2"]["a"]]
+    assert abs(v_mid - 9.0) < 1e-6, v_mid
+    r1 = next(i for i in win2.circuit_scene.placed_items if i.component.name == "R1")
+    assert r1.component.resistance == 1000.0
+    r2b = next(i for i in win2.circuit_scene.placed_items if i.component.name == "R2")
+    assert r2b.component.resistance == 3000.0 and r2b.rotation_deg == 90
+    old_ids = {w.wire_id for w in win2.circuit_scene.placed_wires}
+    assert win2.circuit_scene.next_wire_id() not in old_ids
+    win2.circuit_scene.undo_stack.setClean()
+    win2.close()
 
 
-def test_bad_files_show_message_and_leave_scene_unchanged() -> None:
-    script = _QT_PRELUDE + """
-build_divider()
-good = tmp / "good.circ"
-assert win.save_to_path(good)
-text = good.read_text(encoding="utf-8")
+def test_bad_files_show_message_and_leave_scene_unchanged(tmp_path, qapp) -> None:
+    win, errors, scene, build_divider = _new_test_window()
+    build_divider()
+    good = tmp_path / "good.circ"
+    assert win.save_to_path(good)
+    text = good.read_text(encoding="utf-8")
 
-def snapshot():
-    return json.dumps(
-        [(i.component.name, i.pos().x(), i.pos().y(), i.rotation_deg) for i in scene.placed_items]
-        + [(w.wire_id, list(w.points)) for w in scene.placed_wires], default=str)
+    def snapshot() -> str:
+        return json.dumps(
+            [(i.component.name, i.pos().x(), i.pos().y(), i.rotation_deg) for i in scene.placed_items]
+            + [(w.wire_id, list(w.points)) for w in scene.placed_wires],
+            default=str,
+        )
 
-before = snapshot()
-undo_before = scene.undo_stack.count()
+    before = snapshot()
+    undo_before = scene.undo_stack.count()
 
-newer = json.loads(text); newer["schema_version"] = 99
-bad_cases = {
-    "empty.circ": "",
-    "truncated.circ": text[: len(text) // 2],
-    "garbage.circ": "\\x00\\x01 not a circuit",
-    "wrongformat.circ": json.dumps({"hello": 1}),
-    "newer.circ": json.dumps(newer),
-}
-for name, content in bad_cases.items():
-    p = tmp / name
-    p.write_text(content, encoding="utf-8")
-    assert win.open_path(p) is False, name
-    assert snapshot() == before, "scene changed by " + name
-    assert scene.undo_stack.count() == undo_before
-assert len(errors) == len(bad_cases), errors
-assert any("newer version of CircuitSim" in e for e in errors)
-assert any("empty" in e for e in errors)
-assert win.open_path(tmp / "does_not_exist.circ") is False
-assert snapshot() == before
+    newer = json.loads(text)
+    newer["schema_version"] = 99
+    bad_cases = {
+        "empty.circ": "",
+        "truncated.circ": text[: len(text) // 2],
+        "garbage.circ": "\x00\x01 not a circuit",
+        "wrongformat.circ": json.dumps({"hello": 1}),
+        "newer.circ": json.dumps(newer),
+    }
+    for name, content in bad_cases.items():
+        p = tmp_path / name
+        p.write_text(content, encoding="utf-8")
+        assert win.open_path(p) is False, name
+        assert snapshot() == before, "scene changed by " + name
+        assert scene.undo_stack.count() == undo_before
+    assert len(errors) == len(bad_cases), errors
+    assert any("newer version of CircuitSim" in e for e in errors)
+    assert any("empty" in e for e in errors)
+    assert win.open_path(tmp_path / "does_not_exist.circ") is False
+    assert snapshot() == before
 
-# a file that is valid JSON/format but has one bad component loads NOTHING
-broken = json.loads(text); broken["components"][-1]["rotation_deg"] = 45
-(tmp / "broken.circ").write_text(json.dumps(broken), encoding="utf-8")
-assert win.open_path(tmp / "broken.circ") is False
-assert snapshot() == before
-scene.undo_stack.setClean(); win.close()
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-
-
-def test_unsaved_changes_prompt_for_new_open_and_close() -> None:
-    script = _QT_PRELUDE + """
-asked = []
-answer = {"v": QMessageBox.StandardButton.Cancel}
-win._ask_save_discard_cancel = lambda what: (asked.append(what), answer["v"])[1]
-build_divider()
-n = len(scene.placed_items)
-
-# Cancel keeps everything
-win._on_new_circuit()
-assert len(scene.placed_items) == n and asked and "new circuit" in asked[-1]
-win.close()
-assert win.isVisible() or True  # close() was refused, window not torn down
-assert "closing" in asked[-1] and len(scene.placed_items) == n
-
-# Discard goes ahead
-answer["v"] = QMessageBox.StandardButton.Discard
-win._on_new_circuit()
-assert len(scene.placed_items) == 0 and not win.has_unsaved_changes()
-assert win.windowTitle().startswith("Untitled") and "*" not in win.windowTitle()
-
-# No prompt when nothing changed
-asked.clear()
-win._on_new_circuit()
-assert asked == []
-
-# Save answer: saves to the chosen path and then continues
-build_divider()
-target = tmp / "prompted.circ"
-win._on_save_circuit_as = lambda: win.save_to_path(target)
-answer["v"] = QMessageBox.StandardButton.Save
-win._on_new_circuit()
-assert target.exists() and len(scene.placed_items) == 0
-win.close()
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    broken = json.loads(text)
+    broken["components"][-1]["rotation_deg"] = 45
+    (tmp_path / "broken.circ").write_text(json.dumps(broken), encoding="utf-8")
+    assert win.open_path(tmp_path / "broken.circ") is False
+    assert snapshot() == before
+    scene.undo_stack.setClean()
+    win.close()
 
 
-def test_toolbar_and_menu_file_actions_exist_and_work() -> None:
-    script = _QT_PRELUDE + """
-shortcuts = {a.text().replace("&", ""): a.shortcut().toString() for a in
-             (win.act_new, win.act_open, win.act_save, win.act_save_as)}
-assert shortcuts["New"] == "Ctrl+N", shortcuts
-assert shortcuts["Open..."] == "Ctrl+O", shortcuts
-assert shortcuts["Save"] == "Ctrl+S", shortcuts
-assert shortcuts["Save As..."] == "Ctrl+Shift+S", shortcuts
-# toolbar buttons are wired to the same actions
-tb_actions = [a for tb in win.findChildren(type(win.findChild(__import__("PySide6.QtWidgets", fromlist=["QToolBar"]).QToolBar)))
-              for a in tb.actions()]
-for a in (win.act_new, win.act_open, win.act_save):
-    assert a in tb_actions
-# Save with a known path triggers a real save when the action fires
-build_divider()
-target = tmp / "viaaction.circ"
-win._current_path = target
-win.act_save.trigger()
-assert target.exists() and not win.has_unsaved_changes()
-win.close()
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+def test_unsaved_changes_prompt_for_new_open_and_close(tmp_path, qapp) -> None:
+    from PySide6.QtWidgets import QMessageBox
+
+    win, _errors, scene, build_divider = _new_test_window()
+    asked: list[str] = []
+    answer = {"v": QMessageBox.StandardButton.Cancel}
+    win._ask_save_discard_cancel = lambda what: (asked.append(what), answer["v"])[1]
+    build_divider()
+    n = len(scene.placed_items)
+
+    win._on_new_circuit()
+    assert len(scene.placed_items) == n and asked and "new circuit" in asked[-1]
+    win.close()
+    assert win.isVisible() or True
+    assert "closing" in asked[-1] and len(scene.placed_items) == n
+
+    answer["v"] = QMessageBox.StandardButton.Discard
+    win._on_new_circuit()
+    assert len(scene.placed_items) == 0 and not win.has_unsaved_changes()
+    assert win.windowTitle().startswith("Untitled") and "*" not in win.windowTitle()
+
+    asked.clear()
+    win._on_new_circuit()
+    assert asked == []
+
+    build_divider()
+    target = tmp_path / "prompted.circ"
+    win._on_save_circuit_as = lambda: win.save_to_path(target)
+    answer["v"] = QMessageBox.StandardButton.Save
+    win._on_new_circuit()
+    assert target.exists() and len(scene.placed_items) == 0
+    win.close()
 
 
-def test_fresh_window_starts_empty_and_clean_with_no_close_prompt() -> None:
+def test_toolbar_and_menu_file_actions_exist_and_work(tmp_path, qapp) -> None:
+    from PySide6.QtWidgets import QToolBar
+
+    win, _errors, _scene, build_divider = _new_test_window()
+    shortcuts = {
+        a.text().replace("&", ""): a.shortcut().toString()
+        for a in (win.act_new, win.act_open, win.act_save, win.act_save_as)
+    }
+    assert shortcuts["New"] == "Ctrl+N", shortcuts
+    assert shortcuts["Open..."] == "Ctrl+O", shortcuts
+    assert shortcuts["Save"] == "Ctrl+S", shortcuts
+    assert shortcuts["Save As..."] == "Ctrl+Shift+S", shortcuts
+
+    tb_actions = [a for tb in win.findChildren(QToolBar) for a in tb.actions()]
+    for a in (win.act_new, win.act_open, win.act_save):
+        assert a in tb_actions
+
+    build_divider()
+    target = tmp_path / "viaaction.circ"
+    win._current_path = target
+    win.act_save.trigger()
+    assert target.exists() and not win.has_unsaved_changes()
+    win.close()
+
+
+def test_fresh_window_starts_empty_and_clean_with_no_close_prompt(qapp) -> None:
     """Item 1: A new MainWindow starts with zero items, clean undo stack,
 
     no asterisk in title, not modified, and closing it shows no prompt.
     """
-    script = """
-import sys
-from PySide6.QtWidgets import QApplication
-from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.main_window import MainWindow
 
-app = QApplication.instance() or QApplication(sys.argv)
-win = MainWindow()
+    win = MainWindow()
 
-# 1. Zero parts, zero wires, zero junctions
-assert len(win.circuit_scene.placed_items) == 0, f"Expected 0 items, got {len(win.circuit_scene.placed_items)}"
-assert len(win.circuit_scene.placed_wires) == 0, f"Expected 0 wires, got {len(win.circuit_scene.placed_wires)}"
-assert len(win.circuit_scene._explicit_junctions) == 0, "Expected 0 junctions"
+    assert len(win.circuit_scene.placed_items) == 0
+    assert len(win.circuit_scene.placed_wires) == 0
+    assert len(win.circuit_scene._explicit_junctions) == 0
 
-# 2. Clean undo stack
-undo_stack = win.circuit_scene.undo_stack
-assert not undo_stack.canUndo(), "Fresh window must not have canUndo"
-assert not undo_stack.canRedo(), "Fresh window must not have canRedo"
-assert undo_stack.isClean(), "Fresh window undo stack must be clean"
+    undo_stack = win.circuit_scene.undo_stack
+    assert not undo_stack.canUndo()
+    assert not undo_stack.canRedo()
+    assert undo_stack.isClean()
 
-# 3. Title has no asterisk and mentions Untitled
-title = win.windowTitle()
-assert "*" not in title, f"Title should not have asterisk: {title}"
-assert "Untitled" in title, f"Title should have Untitled: {title}"
+    title = win.windowTitle()
+    assert "*" not in title, f"Title should not have asterisk: {title}"
+    assert "Untitled" in title, f"Title should have Untitled: {title}"
+    assert not win.has_unsaved_changes()
 
-# 4. Window is not modified
-assert not win.has_unsaved_changes(), "Fresh window must not have unsaved changes"
-
-# 5. Closing it shows no prompt (assert prompt function was never called)
-prompt_called = []
-win._ask_save_discard_cancel = lambda what: prompt_called.append(what)
-win.close()
-assert prompt_called == [], f"Prompt function was unexpectedly called: {prompt_called}"
-
-print("ITEM1_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "ITEM1_OK" in res.stdout
+    prompt_called: list[str] = []
+    win._ask_save_discard_cancel = lambda what: prompt_called.append(what)
+    win.close()
+    assert prompt_called == [], f"Prompt function was unexpectedly called: {prompt_called}"
 
 
-def test_window_shutdown_cleanliness_all_cases(tmp_path: Path) -> None:
+def test_window_shutdown_cleanliness_all_cases(tmp_path, qapp, monkeypatch, capsys) -> None:
     """Item 2: Verify window shutdown with all unsaved prompt cases (discard, save, cancel,
 
     no changes, running sim, loaded file, new with discard, close twice) produces zero
     exceptions and zero error popups.
     """
+    import traceback
+    from PySide6.QtCore import QEventLoop, QPointF, QTimer
+    from PySide6.QtWidgets import QMessageBox
+    from circuitsim.app.main_window import MainWindow
+
+    captured_exceptions: list[tuple] = []
+    error_dialogs_shown: list[tuple[str, str]] = []
     err_file = tmp_path / "exceptions.log"
-    err_file_str = str(err_file).replace("\\", "/")
-    tmp_dir_str = str(tmp_path).replace("\\", "/")
-    script = f"""
-import sys, os, tempfile, traceback
-from pathlib import Path
 
-from PySide6.QtCore import QPointF, QTimer, QEventLoop
-from PySide6.QtWidgets import QApplication, QMessageBox
-from circuitsim.app.crash_handler import install_global_exception_hook
-from circuitsim.app.main_window import MainWindow
+    def exception_collector(exctype, value, tb) -> None:
+        tb_str = "".join(traceback.format_exception(exctype, value, tb))
+        captured_exceptions.append((exctype, value, tb_str))
+        with open(err_file, "a", encoding="utf-8") as f:
+            f.write(f"{exctype.__name__}: {value}\n{tb_str}\n")
 
-captured_exceptions = []
-error_dialogs_shown = []
-err_log_path = Path(r"{err_file_str}")
+    monkeypatch.setattr(sys, "excepthook", exception_collector)
 
-def exception_collector(exctype, value, tb):
-    tb_str = "".join(traceback.format_exception(exctype, value, tb))
-    captured_exceptions.append((exctype, value, tb_str))
-    try:
-        with open(err_log_path, "a", encoding="utf-8") as f:
-            f.write(f"{{exctype.__name__}}: {{value}}\\n{{tb_str}}\\n")
-    except Exception:
-        pass
+    def patch_error(win: MainWindow) -> None:
+        win._show_error = lambda t, m: error_dialogs_shown.append((t, m))
 
-sys.excepthook = exception_collector
+    # Case 1: Discard
+    win1 = MainWindow()
+    patch_error(win1)
+    win1.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+    win1._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+    win1.close()
+    qapp.processEvents()
 
-app = QApplication.instance() or QApplication(sys.argv)
-tmp_dir = Path(r"{tmp_dir_str}")
+    # Case 2: Save
+    win2 = MainWindow()
+    patch_error(win2)
+    win2.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+    save_target = tmp_path / "saved_case.circ"
+    win2._on_save_circuit_as = lambda: win2.save_to_path(save_target)
+    win2._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Save
+    win2.close()
+    qapp.processEvents()
+    assert save_target.exists(), "Save case must have written file"
 
-# Helper to mock error display
-def patch_error(win):
-    win._show_error = lambda t, m: error_dialogs_shown.append((t, m))
+    # Case 3: Cancel
+    win3 = MainWindow()
+    patch_error(win3)
+    win3.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+    win3._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Cancel
+    win3.close()
+    qapp.processEvents()
+    assert win3.isVisible() or not win3.isMinimized(), "Window must stay open on Cancel"
+    win3._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+    win3.close()
+    qapp.processEvents()
 
-# Case 1: Discard
-win1 = MainWindow()
-patch_error(win1)
-win1.circuit_scene.place_new_component("resistor", QPointF(0, 0))
-win1._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
-win1.close()
-app.processEvents()
+    # Case 4: No changes
+    win4 = MainWindow()
+    patch_error(win4)
+    prompt_called4: list[str] = []
+    win4._ask_save_discard_cancel = lambda what: prompt_called4.append(what)
+    win4.close()
+    qapp.processEvents()
+    assert prompt_called4 == [], "No changes case must not show prompt"
 
-# Case 2: Save (patch save file dialog to write to temporary file)
-win2 = MainWindow()
-patch_error(win2)
-win2.circuit_scene.place_new_component("resistor", QPointF(0, 0))
-save_target = tmp_dir / "saved_case.circ"
-win2._on_save_circuit_as = lambda: win2.save_to_path(save_target)
-win2._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Save
-win2.close()
-app.processEvents()
-assert save_target.exists(), "Save case must have written file"
+    # Case 5: Simulation running while closing
+    win5 = MainWindow()
+    patch_error(win5)
+    win5.circuit_scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+    win5.circuit_scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
+    win5.circuit_scene.place_new_component("ground", QPointF(0, 60))
+    win5.circuit_scene.add_wire([(0, -40), (100, -40)])
+    win5.circuit_scene.add_wire([(0, 40), (100, 40)])
+    win5.start_simulation()
+    loop = QEventLoop()
+    QTimer.singleShot(60, loop.quit)
+    loop.exec()
+    win5._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+    win5.close()
+    qapp.processEvents()
 
-# Case 3: Cancel (window stays open, no exception)
-win3 = MainWindow()
-patch_error(win3)
-win3.circuit_scene.place_new_component("resistor", QPointF(0, 0))
-win3._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Cancel
-win3.close()
-app.processEvents()
-assert win3.isVisible() or not win3.isMinimized(), "Window must stay open on Cancel"
-# Clean up win3
-win3._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
-win3.close()
-app.processEvents()
+    # Case 6: After loading a file
+    win6 = MainWindow()
+    patch_error(win6)
+    assert win6.open_path(save_target) is True
+    win6.circuit_scene.place_new_component("capacitor", QPointF(200, 0))
+    win6._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+    win6.close()
+    qapp.processEvents()
 
-# Case 4: No changes
-win4 = MainWindow()
-patch_error(win4)
-prompt_called4 = []
-win4._ask_save_discard_cancel = lambda what: prompt_called4.append(what)
-win4.close()
-app.processEvents()
-assert prompt_called4 == [], "No changes case must not show prompt"
+    # Case 7: After File > New with discard
+    win7 = MainWindow()
+    patch_error(win7)
+    win7.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+    win7._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+    win7._on_new_circuit()
+    win7.close()
+    qapp.processEvents()
 
-# Case 5: Simulation running while closing
-win5 = MainWindow()
-patch_error(win5)
-v1 = win5.circuit_scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
-r1 = win5.circuit_scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
-gnd = win5.circuit_scene.place_new_component("ground", QPointF(0, 60))
-win5.circuit_scene.add_wire([(0, -40), (100, -40)])
-win5.circuit_scene.add_wire([(0, 40), (100, 40)])
-win5.start_simulation()
-loop = QEventLoop()
-QTimer.singleShot(60, loop.quit)
-loop.exec()
-win5._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
-win5.close()
-app.processEvents()
+    # Case 8: Closing twice quickly
+    win8 = MainWindow()
+    patch_error(win8)
+    win8.circuit_scene.place_new_component("resistor", QPointF(0, 0))
+    win8._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
+    win8.close()
+    win8.close()
+    qapp.processEvents()
 
-# Case 6: After loading a file
-win6 = MainWindow()
-patch_error(win6)
-assert win6.open_path(save_target) is True
-win6.circuit_scene.place_new_component("capacitor", QPointF(200, 0))
-win6._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
-win6.close()
-app.processEvents()
-
-# Case 7: After File > New with discard
-win7 = MainWindow()
-patch_error(win7)
-win7.circuit_scene.place_new_component("resistor", QPointF(0, 0))
-win7._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
-win7._on_new_circuit()
-win7.close()
-app.processEvents()
-
-# Case 8: Closing twice quickly
-win8 = MainWindow()
-patch_error(win8)
-win8.circuit_scene.place_new_component("resistor", QPointF(0, 0))
-win8._ask_save_discard_cancel = lambda what: QMessageBox.StandardButton.Discard
-win8.close()
-win8.close()
-app.processEvents()
-
-assert error_dialogs_shown == [], f"Unexpected error dialogs shown: {{error_dialogs_shown}}"
-assert captured_exceptions == [], f"Exceptions reached hook: {{[e[1] for e in captured_exceptions]}}"
-print("ITEM2_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "ITEM2_OK" in res.stdout
-    assert "libshiboken" not in res.stderr, f"libshiboken error in stderr:\n{res.stderr}"
-    assert "libshiboken" not in res.stdout, f"libshiboken error in stdout:\n{res.stdout}"
-    assert (
-        not err_file.exists() or err_file.read_text(encoding="utf-8").strip() == ""
-    ), f"Shutdown exceptions captured in log file:\n{err_file.read_text(encoding='utf-8') if err_file.exists() else ''}"
+    captured = capsys.readouterr()
+    assert error_dialogs_shown == [], f"Unexpected error dialogs shown: {error_dialogs_shown}"
+    assert captured_exceptions == [], f"Exceptions reached hook: {[e[1] for e in captured_exceptions]}"
+    assert "libshiboken" not in captured.err
+    assert "libshiboken" not in captured.out
+    assert not err_file.exists() or err_file.read_text(encoding="utf-8").strip() == ""
 
 
-def test_quiet_shutdown_error_logging_without_dialog(tmp_path: Path) -> None:
+def test_quiet_shutdown_error_logging_without_dialog(tmp_path, qapp, monkeypatch) -> None:
     """Item 5: Global exception hook writes to log file during shutdown without modal dialog,
 
     while normal runtime errors show the dialog.
     """
-    tmp_path_str = str(tmp_path).replace("\\", "/")
-    script = f"""
-import sys, os, tempfile
-from pathlib import Path
-from PySide6.QtWidgets import QApplication, QMessageBox
-import circuitsim.app.crash_handler as ch
+    from PySide6.QtWidgets import QMessageBox
+    import circuitsim.app.crash_handler as ch
 
-app = QApplication.instance() or QApplication(sys.argv)
-log_dir = Path(r"{tmp_path_str}")
-ch.install_global_exception_hook(log_dir=log_dir)
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    monkeypatch.setenv("QT_QPA_PLATFORM", "normal_test")
 
-dialogs_shown = []
-def mock_critical(parent, title, msg):
-    dialogs_shown.append((title, msg))
+    dialogs_shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda parent, title, msg: dialogs_shown.append((title, msg)))
 
-QMessageBox.critical = mock_critical
-os.environ["QT_QPA_PLATFORM"] = "normal_test"
+    try:
+        ch.install_global_exception_hook(log_dir=tmp_path)
 
-# 1. Normal runtime error: must show dialog AND write to log
-ch.set_shutting_down(False)
-try:
-    raise ValueError("Runtime error while app is running")
-except ValueError as exc:
-    sys.excepthook(type(exc), exc, exc.__traceback__)
+        ch.set_shutting_down(False)
+        try:
+            raise ValueError("Runtime error while app is running")
+        except ValueError as exc:
+            sys.excepthook(type(exc), exc, exc.__traceback__)
 
-log_file = log_dir / "crash.log"
-assert log_file.exists(), "crash.log must exist after runtime error"
-content1 = log_file.read_text(encoding="utf-8")
-assert "Runtime error while app is running" in content1
-assert len(dialogs_shown) == 1, f"Expected 1 dialog during runtime error, got {{len(dialogs_shown)}}"
-assert "CircuitSim Error" in dialogs_shown[0][0]
+        log_file = tmp_path / "crash.log"
+        assert log_file.exists(), "crash.log must exist after runtime error"
+        content1 = log_file.read_text(encoding="utf-8")
+        assert "Runtime error while app is running" in content1
+        assert len(dialogs_shown) == 1
+        assert "CircuitSim Error" in dialogs_shown[0][0]
 
-# 2. Error during shutdown: must write to log but NOT show dialog
-dialogs_shown.clear()
-ch.set_shutting_down(True)
-try:
-    raise RuntimeError("Shutdown teardown error during quitting")
-except RuntimeError as exc:
-    sys.excepthook(type(exc), exc, exc.__traceback__)
+        dialogs_shown.clear()
+        ch.set_shutting_down(True)
+        try:
+            raise RuntimeError("Shutdown teardown error during quitting")
+        except RuntimeError as exc:
+            sys.excepthook(type(exc), exc, exc.__traceback__)
 
-content2 = log_file.read_text(encoding="utf-8")
-assert "Shutdown teardown error during quitting" in content2
-assert len(dialogs_shown) == 0, f"Expected 0 dialogs during shutdown, got {{len(dialogs_shown)}}"
-
-ch.set_shutting_down(False)
-print("ITEM5_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"STDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "ITEM5_OK" in res.stdout
+        content2 = log_file.read_text(encoding="utf-8")
+        assert "Shutdown teardown error during quitting" in content2
+        assert len(dialogs_shown) == 0
+    finally:
+        ch.set_shutting_down(False)
 
 
 

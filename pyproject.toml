@@ -33,3 +33,6 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-v"
+markers = [
+    "slow: marks tests taking more than 3 seconds (deselect with '-m \"not slow\"')",
+]

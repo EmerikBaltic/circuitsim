@@ -26,10 +26,12 @@ from circuitsim.engine import (
 )
 
 
+from conftest import assert_module_has_no_qt_imports
+
+
 def test_no_qt_imports_in_engine_or_components() -> None:
     """Verify the physics engine and component models do not import PySide6."""
-    qt_modules = [m for m in sys.modules if m.startswith("PySide6")]
-    assert qt_modules == []
+    assert_module_has_no_qt_imports("circuitsim.engine", "circuitsim.components")
 
 
 def test_voltage_divider_analytical() -> None:

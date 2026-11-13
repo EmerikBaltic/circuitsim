@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import math
-import subprocess
-import sys
+import tempfile
 import pytest
 
 from circuitsim.components.ground import Ground
@@ -201,138 +200,104 @@ def test_3b_meter_circ_save_load_round_trip() -> None:
 # Part 3b-3d: Offscreen Qt UI Tests (Subprocess with timeout)
 # ----------------------------------------------------------------------
 
-def test_3b_3c_3d_offscreen_qt_meter_features() -> None:
+def test_3b_3c_3d_offscreen_qt_meter_features(qapp) -> None:
     """Verify dialog presets, undo/redo, preferences dialog, and tooltip notices in offscreen Qt."""
-    script = """
-import sys
-import math
-import tempfile
-from PySide6.QtWidgets import QApplication
+    from circuitsim.app.settings import AppSettings
+    from circuitsim.canvas.component_item import ComponentItem
+    from circuitsim.canvas.scene import CircuitScene
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    from circuitsim.dialogs.preferences_dialog import PreferencesDialog
+    from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 
-from circuitsim.app.settings import AppSettings
-from circuitsim.canvas.component_item import ComponentItem
-from circuitsim.canvas.scene import CircuitScene
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.components.ground import Ground
-from circuitsim.components.meters import Ammeter, Voltmeter
-from circuitsim.components.resistor import Resistor
-from circuitsim.components.sources import DCCurrentSource
-from circuitsim.dialogs.preferences_dialog import PreferencesDialog
-from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
-from circuitsim.engine.netlist import Circuit
-from circuitsim.engine.solver import MNASolver
-
-app = QApplication.instance() or QApplication(sys.argv)
-
-# 1. Voltmeter dialog presets & loading notice
-vm = Voltmeter("VM1", "1", "0", r_internal=10e6, is_ideal=False)
-vm.loading_error_message = (
-    "VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."
-)
-applied_map = {}
-def on_apply_vm(m, _s):
-    applied_map.update(m)
-
-dlg_vm = QuickValueDialog(vm, on_apply=on_apply_vm)
-assert dlg_vm.meter_preset_combo is not None
-assert dlg_vm.meter_preset_combo.count() == 4
-assert dlg_vm.meter_preset_combo.currentText() == "10 Mohm (typical multimeter)"
-assert dlg_vm.meter_loading_notice_label is not None
-assert dlg_vm.meter_loading_notice_label.text() == (
-    "VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."
-)
-# Switch to Ideal
-dlg_vm.meter_preset_combo.setCurrentText("Ideal")
-assert not dlg_vm.inputs["r_internal"].isEnabled()
-assert dlg_vm._apply_current_inputs()
-assert applied_map.get("is_ideal") is True
-
-# Switch to 1 Mohm
-dlg_vm.meter_preset_combo.setCurrentText("1 Mohm")
-assert dlg_vm.inputs["r_internal"].isEnabled()
-assert dlg_vm._apply_current_inputs()
-assert applied_map.get("is_ideal") is False
-assert math.isclose(float(applied_map["r_internal"]), 1e6, rel_tol=1e-3)
-dlg_vm.close()
-
-# 2. Ammeter dialog presets
-am = Ammeter("A1", "1", "2", r_internal=1e-3, is_ideal=False)
-applied_map_am = {}
-def on_apply_am(m, _s):
-    applied_map_am.update(m)
-
-dlg_am = QuickValueDialog(am, on_apply=on_apply_am)
-assert dlg_am.meter_preset_combo is not None
-assert dlg_am.meter_preset_combo.currentText() == "1 mohm"
-# Switch to Ideal
-dlg_am.meter_preset_combo.setCurrentText("Ideal (0 V branch)")
-assert not dlg_am.inputs["r_internal"].isEnabled()
-assert dlg_am._apply_current_inputs()
-assert applied_map_am.get("is_ideal") is True
-dlg_am.close()
-
-# 3. Meter Undo / Redo in CircuitScene
-scene = CircuitScene(SymbolLibrary())
-item = scene.place_new_component("voltmeter", (0, 0))
-vm_scene = item.component
-assert isinstance(vm_scene, Voltmeter)
-assert vm_scene.is_ideal is True
-scene.edit_component_parameters(item, {"is_ideal": False, "r_internal": 10e6})
-assert vm_scene.is_ideal is False
-assert math.isclose(vm_scene.r_internal, 10e6)
-scene.undo_stack.undo()
-assert vm_scene.is_ideal is True
-scene.undo_stack.redo()
-assert vm_scene.is_ideal is False
-assert math.isclose(vm_scene.r_internal, 10e6)
-
-# 4. Preferences Dialog and Settings
-with tempfile.TemporaryDirectory() as tmp_dir:
-    settings = AppSettings(data_dir=tmp_dir)
-    assert settings.get_new_meters_mode() == "ideal"
-
-    pref = PreferencesDialog(settings)
-    assert hasattr(pref, "combo_meters_mode")
-    assert pref.combo_meters_mode.currentText() == "Ideal"
-    pref.combo_meters_mode.setCurrentText("Realistic")
-    pref._on_accept()
-    assert settings.get_new_meters_mode() == "realistic"
-
-    # Persistence
-    pref2 = PreferencesDialog(settings)
-    assert pref2.combo_meters_mode.currentText() == "Realistic"
-    pref2.close()
-
-    # Palette placement respects setting
-    scene_pref = CircuitScene(SymbolLibrary(), settings=settings)
-    vm_real = scene_pref.place_new_component("voltmeter", (0, 0))
-    assert vm_real.component.is_ideal is False
-    assert math.isclose(vm_real.component.r_internal, 10e6)
-
-# 5. Tooltip and Dialog Loading Notice text
-c = Circuit()
-c.add(Ground("GND", "0"))
-c.add(DCCurrentSource("I1", "1", "0", current=30e-3))
-c.add(Resistor("R1", "1", "0", resistance=10e3))
-vm_load = Voltmeter("VM1", "1", "0", r_internal=10e6, is_ideal=False)
-c.add(vm_load)
-MNASolver(c).solve_dc()
-expected_msg = (
-    "VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."
-)
-assert vm_load.loading_error_message == expected_msg
-item_load = ComponentItem(vm_load, SymbolLibrary())
-tip = item_load.get_live_tooltip(is_running=True)
-assert expected_msg in tip
-
-print("OK")
-"""
-    res = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=20,
+    vm = Voltmeter("VM1", "1", "0", r_internal=10e6, is_ideal=False)
+    vm.loading_error_message = (
+        "VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."
     )
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "OK" in res.stdout
+    applied_map: dict[str, object] = {}
+
+    def on_apply_vm(m, _s):
+        applied_map.update(m)
+
+    dlg_vm = QuickValueDialog(vm, on_apply=on_apply_vm)
+    assert dlg_vm.meter_preset_combo is not None
+    assert dlg_vm.meter_preset_combo.count() == 4
+    assert dlg_vm.meter_preset_combo.currentText() == "10 Mohm (typical multimeter)"
+    assert dlg_vm.meter_loading_notice_label is not None
+    assert dlg_vm.meter_loading_notice_label.text() == (
+        "VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."
+    )
+    dlg_vm.meter_preset_combo.setCurrentText("Ideal")
+    assert not dlg_vm.inputs["r_internal"].isEnabled()
+    assert dlg_vm._apply_current_inputs()
+    assert applied_map.get("is_ideal") is True
+
+    dlg_vm.meter_preset_combo.setCurrentText("1 Mohm")
+    assert dlg_vm.inputs["r_internal"].isEnabled()
+    assert dlg_vm._apply_current_inputs()
+    assert applied_map.get("is_ideal") is False
+    assert math.isclose(float(applied_map["r_internal"]), 1e6, rel_tol=1e-3)
+    dlg_vm.close()
+
+    am = Ammeter("A1", "1", "2", r_internal=1e-3, is_ideal=False)
+    applied_map_am: dict[str, object] = {}
+
+    def on_apply_am(m, _s):
+        applied_map_am.update(m)
+
+    dlg_am = QuickValueDialog(am, on_apply=on_apply_am)
+    assert dlg_am.meter_preset_combo is not None
+    assert dlg_am.meter_preset_combo.currentText() == "1 mohm"
+    dlg_am.meter_preset_combo.setCurrentText("Ideal (0 V branch)")
+    assert not dlg_am.inputs["r_internal"].isEnabled()
+    assert dlg_am._apply_current_inputs()
+    assert applied_map_am.get("is_ideal") is True
+    dlg_am.close()
+
+    scene = CircuitScene(SymbolLibrary())
+    item = scene.place_new_component("voltmeter", (0, 0))
+    vm_scene = item.component
+    assert isinstance(vm_scene, Voltmeter)
+    assert vm_scene.is_ideal is True
+    scene.edit_component_parameters(item, {"is_ideal": False, "r_internal": 10e6})
+    assert vm_scene.is_ideal is False
+    assert math.isclose(vm_scene.r_internal, 10e6)
+    scene.undo_stack.undo()
+    assert vm_scene.is_ideal is True
+    scene.undo_stack.redo()
+    assert vm_scene.is_ideal is False
+    assert math.isclose(vm_scene.r_internal, 10e6)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        settings = AppSettings(data_dir=tmp_dir)
+        assert settings.get_new_meters_mode() == "ideal"
+
+        pref = PreferencesDialog(settings)
+        assert hasattr(pref, "combo_meters_mode")
+        assert pref.combo_meters_mode.currentText() == "Ideal"
+        pref.combo_meters_mode.setCurrentText("Realistic")
+        pref._on_accept()
+        assert settings.get_new_meters_mode() == "realistic"
+
+        pref2 = PreferencesDialog(settings)
+        assert pref2.combo_meters_mode.currentText() == "Realistic"
+        pref2.close()
+
+        scene_pref = CircuitScene(SymbolLibrary(), settings=settings)
+        vm_real = scene_pref.place_new_component("voltmeter", (0, 0))
+        assert vm_real.component.is_ideal is False
+        assert math.isclose(vm_real.component.r_internal, 10e6)
+
+    c = Circuit()
+    c.add(Ground("GND", "0"))
+    c.add(DCCurrentSource("I1", "1", "0", current=30e-3))
+    c.add(Resistor("R1", "1", "0", resistance=10e3))
+    vm_load = Voltmeter("VM1", "1", "0", r_internal=10e6, is_ideal=False)
+    c.add(vm_load)
+    MNASolver(c).solve_dc()
+    expected_msg = (
+        "VM1 draws 30 uA from the 10 kohm resistor; the reading is 0.1% lower than the unloaded voltage."
+    )
+    assert vm_load.loading_error_message == expected_msg
+    item_load = ComponentItem(vm_load, SymbolLibrary())
+    tip = item_load.get_live_tooltip(is_running=True)
+    assert expected_msg in tip

@@ -221,69 +221,40 @@ def test_rotation_cycle_and_rotating_back_preserves_voltages() -> None:
         assert r1.power == pytest.approx(0.144)
 
 
-def _run_qt(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
+def test_circuit_scene_undo_redo_rotation_and_drag(qapp) -> None:
+    """Qt test: CircuitScene rotate, flip, and drag undo/redo restores part and wires exactly."""
+    from PySide6.QtCore import QPointF
+    from circuitsim.canvas.scene import CircuitScene
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
 
+    lib = SymbolLibrary()
+    scene = CircuitScene(lib)
 
-def test_circuit_scene_undo_redo_rotation_and_drag() -> None:
-    """Subprocess Qt test: CircuitScene rotate, flip, and drag undo/redo restores part and wires exactly."""
-    script = """
-import sys
-from PySide6.QtCore import QPointF
-from PySide6.QtWidgets import QApplication
+    r1 = scene.place_new_component("resistor", QPointF(200, 200))
+    w1 = scene.add_wire(((100.0, 200.0), (160.0, 200.0)))
+    w2 = scene.add_wire(((240.0, 200.0), (300.0, 200.0)))
 
-from circuitsim.canvas.scene import CircuitScene
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    orig_rot = r1.rotation_deg
+    orig_w1 = w1.points
+    orig_w2 = w2.points
 
-app = QApplication(sys.argv)
-lib = SymbolLibrary()
-scene = CircuitScene(lib)
+    scene.clearSelection()
+    r1.setSelected(True)
+    assert scene.rotate_selected()
+    assert r1.rotation_deg == 90
+    assert w1.points[-1] == (200, 160)
+    assert w2.points[0] == (200, 240)
 
-# 1. Place resistor at (200, 200) with two attached wires
-r1 = scene.place_new_component("resistor", QPointF(200, 200))
-w1 = scene.add_wire(((100.0, 200.0), (160.0, 200.0)))
-w2 = scene.add_wire(((240.0, 200.0), (300.0, 200.0)))
+    scene.undo_stack.undo()
+    assert r1.rotation_deg == orig_rot
+    assert w1.points == orig_w1
+    assert w2.points == orig_w2
 
-orig_rot = r1.rotation_deg
-orig_pos = (r1.pos().x(), r1.pos().y())
-orig_w1 = w1.points
-orig_w2 = w2.points
+    scene.undo_stack.redo()
+    assert r1.rotation_deg == 90
+    assert w1.points[-1] == (200, 160)
+    assert w2.points[0] == (200, 240)
 
-# 2. Select and rotate 90°
-scene.clearSelection()
-r1.setSelected(True)
-assert scene.rotate_selected()
-assert r1.rotation_deg == 90
-assert w1.points[-1] == (200, 160)
-assert w2.points[0] == (200, 240)
-
-# Undo rotation
-scene.undo_stack.undo()
-assert r1.rotation_deg == orig_rot
-assert w1.points == orig_w1
-assert w2.points == orig_w2
-
-# Redo rotation
-scene.undo_stack.redo()
-assert r1.rotation_deg == 90
-assert w1.points[-1] == (200, 160)
-assert w2.points[0] == (200, 240)
-
-# 3. Flip
-assert scene.flip_selected()
-# Undo flip
-scene.undo_stack.undo()
-assert r1.rotation_deg == 90
-
-print("UNDO_REDO_ROTATION_PASSED")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "UNDO_REDO_ROTATION_PASSED" in res.stdout
+    assert scene.flip_selected()
+    scene.undo_stack.undo()
+    assert r1.rotation_deg == 90

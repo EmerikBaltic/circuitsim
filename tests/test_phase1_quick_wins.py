@@ -2,21 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-import subprocess
 import sys
-
-
-def _run_qt(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-    )
 
 
 def test_task1_housekeeping_gitignore() -> None:
@@ -29,118 +16,91 @@ def test_task1_housekeeping_gitignore() -> None:
     assert "*.corrupt" in lines, "*.corrupt must be in .gitignore"
 
 
-def test_task1_switch_breakdown_hint_and_label_collisions() -> None:
-    """Task 1b and 1c in a single Qt subprocess run:
+def test_task1_switch_breakdown_hint_and_label_collisions(qapp) -> None:
+    """Task 1b and 1c:
 
     1b: Switch breakdown voltage field has contact arc hint label.
     1c: Label placement avoids overlaps (meters near neighbouring parts),
         deterministic candidate picking (below, above, right, left),
         fallback to default if no free position, and stability.
     """
-    script = """
-import sys
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtWidgets import QApplication, QLabel
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QLabel
 
-from circuitsim.canvas.component_item import ComponentItem
-from circuitsim.canvas.scene import CircuitScene
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.components import Lightbulb, Resistor, Switch, Voltmeter
-from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+    from circuitsim.canvas.scene import CircuitScene
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    from circuitsim.components import Switch
+    from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
 
-app = QApplication.instance() or QApplication([])
+    # Task 1b: Switch double-click dialog breakdown voltage hint
+    sw = Switch("SW1", "1", "2", v_breakdown=350.0)
+    dlg = QuickValueDialog(sw)
+    labels = dlg.findChildren(QLabel)
+    expected_hint = (
+        "Contact arc is a simplified model: a switch with more than this voltage across it can arc. "
+        "Set to 0 for an ideal contact."
+    )
+    assert any(expected_hint in lbl.text() for lbl in labels), (
+        f"Expected arc hint not found in QuickValueDialog for switch. Labels: {[l.text() for l in labels]}"
+    )
 
-# -------------------------------------------------------------
-# Task 1b: Switch double-click dialog breakdown voltage hint
-# -------------------------------------------------------------
-sw = Switch("SW1", "1", "2", v_breakdown=350.0)
-dlg = QuickValueDialog(sw)
-labels = dlg.findChildren(QLabel)
-hint_found = False
-expected_hint = (
-    "Contact arc is a simplified model: a switch with more than this voltage across it can arc. "
-    "Set to 0 for an ideal contact."
-)
-for lbl in labels:
-    if expected_hint in lbl.text():
-        hint_found = True
-        break
-assert hint_found, f"Expected arc hint not found in QuickValueDialog for switch. Labels: {[l.text() for l in labels]}"
+    # Task 1c: Label collision avoidance with screenshot layout
+    sym_lib = SymbolLibrary()
+    scene = CircuitScene(sym_lib)
 
-# -------------------------------------------------------------
-# Task 1c: Label collision avoidance with screenshot layout
-# -------------------------------------------------------------
-sym_lib = SymbolLibrary()
-scene = CircuitScene(sym_lib)
+    vm1 = scene.place_new_component("voltmeter", QPointF(100.0, 100.0))
+    r1 = scene.place_new_component("resistor", QPointF(100.0, 160.0))
+    vm2 = scene.place_new_component("voltmeter", QPointF(300.0, 100.0))
+    b1 = scene.place_new_component("lightbulb", QPointF(300.0, 160.0))
 
-# Screenshot layout:
-# VM1 at (100, 100) right above R1 at (100, 160)
-# VM2 at (300, 100) right above B1 at (300, 160)
-vm1 = scene.place_new_component("voltmeter", QPointF(100.0, 100.0))
-r1 = scene.place_new_component("resistor", QPointF(100.0, 160.0))
-vm2 = scene.place_new_component("voltmeter", QPointF(300.0, 100.0))
-b1 = scene.place_new_component("lightbulb", QPointF(300.0, 160.0))
+    vm1.live_display_value = "201.4 V"
+    vm2.live_display_value = "48.35 V"
 
-vm1.live_display_value = "201.4 V"
-vm2.live_display_value = "48.35 V"
+    default_vm1_val = vm1.candidate_label_rects_scene("default")[1]
+    default_r1_name = r1.candidate_label_rects_scene("default")[0]
+    assert default_vm1_val.intersects(default_r1_name), "Setup check: default VM1 and R1 must collide"
 
-# Under default positions, VM1 value collides with R1 name, and VM2 value collides with B1 name
-default_vm1_val = vm1.candidate_label_rects_scene("default")[1]
-default_r1_name = r1.candidate_label_rects_scene("default")[0]
-assert default_vm1_val.intersects(default_r1_name), "Setup check: default VM1 and R1 must collide"
+    default_vm2_val = vm2.candidate_label_rects_scene("default")[1]
+    default_b1_name = b1.candidate_label_rects_scene("default")[0]
+    assert default_vm2_val.intersects(default_b1_name), "Setup check: default VM2 and B1 must collide"
 
-default_vm2_val = vm2.candidate_label_rects_scene("default")[1]
-default_b1_name = b1.candidate_label_rects_scene("default")[0]
-assert default_vm2_val.intersects(default_b1_name), "Setup check: default VM2 and B1 must collide"
+    scene.update_label_positions()
 
-# Now run collision avoidance
-scene.update_label_positions()
+    items = [vm1, r1, vm2, b1]
+    all_label_rects = []
+    for it in items:
+        for r in it.candidate_label_rects_scene():
+            all_label_rects.append((it, r))
 
-# Verify that VM1 and VM2 resolved their collisions
-items = [vm1, r1, vm2, b1]
-all_label_rects = []
-for it in items:
-    rects = it.candidate_label_rects_scene()
-    for r in rects:
-        all_label_rects.append((it, r))
+    for i in range(len(all_label_rects)):
+        it_a, rect_a = all_label_rects[i]
+        for j in range(i + 1, len(all_label_rects)):
+            it_b, rect_b = all_label_rects[j]
+            if it_a is not it_b:
+                assert not rect_a.intersects(rect_b), (
+                    f"Collision between label of {it_a.component.name} ({rect_a}) "
+                    f"and {it_b.component.name} ({rect_b})"
+                )
 
-# 1. No two label rectangles overlap
-for i in range(len(all_label_rects)):
-    it_a, rect_a = all_label_rects[i]
-    for j in range(i + 1, len(all_label_rects)):
-        it_b, rect_b = all_label_rects[j]
-        if it_a is not it_b:
-            assert not rect_a.intersects(rect_b), (
-                f"Collision between label of {it_a.component.name} ({rect_a}) "
-                f"and {it_b.component.name} ({rect_b})"
-            )
+    for it, rect in all_label_rects:
+        for other in items:
+            if other is not it:
+                body = other.scene_body_rect()
+                assert not rect.intersects(body), (
+                    f"Label of {it.component.name} ({rect}) overlaps body of {other.component.name} ({body})"
+                )
 
-# 2. No label overlaps any component body
-for it, rect in all_label_rects:
-    for other in items:
-        if other is not it:
-            body = other.scene_body_rect()
-            assert not rect.intersects(body), (
-                f"Label of {it.component.name} ({rect}) overlaps body of {other.component.name} ({body})"
-            )
-
-# 3. Fallback to default when no free position exists
-isolated = scene.place_new_component("resistor", QPointF(600.0, 600.0))
-scene.update_label_positions()
-assert isolated.label_position == "default", "Unobstructed item should pick default position"
-
-print("TASK1_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK1_OK" in res.stdout
+    isolated = scene.place_new_component("resistor", QPointF(600.0, 600.0))
+    scene.update_label_positions()
+    assert isolated.label_position == "default", "Unobstructed item should pick default position"
 
 
-def test_task2_recent_files(tmp_path: Path) -> None:
+def test_task2_recent_files(tmp_path: Path, qapp) -> None:
     """Task 2: Recent files ordering, limit of 8, duplicate to top, persistence,
 
     missing file removal, and UI interaction (tooltips, clear list, unsaved prompt).
     """
+    from circuitsim.app.main_window import MainWindow
     from circuitsim.app.settings import AppSettings
 
     data_dir = tmp_path / "app_data"
@@ -154,7 +114,6 @@ def test_task2_recent_files(tmp_path: Path) -> None:
 
     recents = settings.get_recent_files()
     assert len(recents) == 8, f"Expected 8 recent files, got {len(recents)}"
-    # Most recent first: circuit_10 should be at index 0, circuit_3 at index 7
     assert Path(recents[0]).name == "circuit_10.circ"
     assert Path(recents[7]).name == "circuit_3.circ"
 
@@ -168,59 +127,37 @@ def test_task2_recent_files(tmp_path: Path) -> None:
     settings2 = AppSettings(data_dir=data_dir)
     assert settings2.get_recent_files() == recents
 
-    # 4. Qt Subprocess UI test
-    script = f"""
-import sys
-from pathlib import Path
-from PySide6.QtWidgets import QApplication
-from circuitsim.app.main_window import MainWindow
-from circuitsim.app.settings import AppSettings
+    # 4. In-process UI test
+    win = MainWindow(settings=settings2)
 
-app = QApplication.instance() or QApplication([])
-data_dir = Path(r"{data_dir}")
-settings = AppSettings(data_dir=data_dir)
-win = MainWindow(settings=settings)
+    recent_menu = win.recent_menu
+    actions = [a for a in recent_menu.actions() if not a.isSeparator()]
+    assert len(actions) == 9, f"Expected 8 files + 1 Clear list, got {len(actions)}"
 
-# Inspect Open Recent menu
-recent_menu = win.recent_menu
-actions = [a for a in recent_menu.actions() if not a.isSeparator()]
-assert len(actions) == 9, f"Expected 8 files + 1 Clear list, got {{len(actions)}}"
+    file_act_0 = actions[0]
+    assert file_act_0.text() == "circuit_5.circ"
+    assert Path(file_act_0.toolTip()).name == "circuit_5.circ"
 
-# File name is text, full path is tooltip
-file_act_0 = actions[0]
-assert file_act_0.text() == "circuit_5.circ"
-assert Path(file_act_0.toolTip()).name == "circuit_5.circ"
+    missing_path = tmp_path / "deleted_circuit.circ"
+    settings2.add_recent_file(missing_path)
+    win._update_recent_files_menu()
 
-# Test missing file handling
-missing_path = Path(r"{tmp_path}") / "deleted_circuit.circ"
-settings.add_recent_file(missing_path)
-win._update_recent_files_menu()
+    error_shown: list[tuple[str, str]] = []
+    win._show_error = lambda title, msg: error_shown.append((title, msg))
 
-# Mock error popup
-error_shown = []
-win._show_error = lambda title, msg: error_shown.append((title, msg))
+    win._on_open_recent_file(str(missing_path))
+    assert len(error_shown) == 1, "Expected error popup for missing file"
+    assert "File Not Found" in error_shown[0][0]
+    assert str(missing_path) not in settings2.get_recent_files(), "Missing file must be removed from settings"
 
-# Trigger opening missing file
-win._on_open_recent_file(str(missing_path))
-assert len(error_shown) == 1, "Expected error popup for missing file"
-assert "File Not Found" in error_shown[0][0]
-assert str(missing_path) not in settings.get_recent_files(), "Missing file must be removed from settings"
-
-# Test Clear list
-clear_act = [a for a in recent_menu.actions() if a.text().lower() == "clear list"][0]
-clear_act.trigger()
-assert len(settings.get_recent_files()) == 0, "Clear list must empty settings"
-rem_actions = [a for a in recent_menu.actions() if a.isEnabled()]
-assert len(rem_actions) == 0, "No active actions should remain after clear list"
-
-print("TASK2_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK2_OK" in res.stdout
+    clear_act = [a for a in recent_menu.actions() if a.text().lower() == "clear list"][0]
+    clear_act.trigger()
+    assert len(settings2.get_recent_files()) == 0, "Clear list must empty settings"
+    rem_actions = [a for a in recent_menu.actions() if a.isEnabled()]
+    assert len(rem_actions) == 0, "No active actions should remain after clear list"
 
 
-def test_task3_example_circuits() -> None:
+def test_task3_example_circuits(qapp) -> None:
     """Task 3: Example circuits bundled in package data, index catalog,
 
     analytic hand calculations for all 5 circuits, and UI menu loading as untitled.
@@ -301,125 +238,99 @@ def test_task3_example_circuits() -> None:
     # Hand formula: V = 12 V + 12 V = 24.0 V
     assert math.isclose(v_series, 24.0, rel_tol=1e-3, abs_tol=1e-3)
 
-    # 6. UI Menu check in Qt subprocess
-    script = """
-import sys
-from PySide6.QtWidgets import QApplication
-from circuitsim.app.main_window import MainWindow
+    # 6. UI Menu check
+    from circuitsim.app.main_window import MainWindow
 
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
+    win = MainWindow()
+    ex_menu = win.examples_menu
+    actions = ex_menu.actions()
+    assert len(actions) == 5, f"Expected 5 example actions, got {len(actions)}"
 
-ex_menu = win.examples_menu
-actions = ex_menu.actions()
-assert len(actions) == 5, f"Expected 5 example actions, got {len(actions)}"
+    act0 = actions[0]
+    assert "Voltage Divider" in act0.text()
+    assert len(act0.toolTip()) > 5
 
-# Verify first action is Voltage Divider
-act0 = actions[0]
-assert "Voltage Divider" in act0.text()
-assert len(act0.toolTip()) > 5
-
-# Trigger action 0 to load example
-act0.trigger()
-assert win._current_path is None, "Example must open as a NEW untitled circuit"
-assert "Untitled" in win.windowTitle(), f"Title must be Untitled, got {win.windowTitle()}"
-assert len(win.circuit_scene.placed_items) >= 4, "Loaded example must have components on canvas"
-
-print("TASK3_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK3_OK" in res.stdout
+    act0.trigger()
+    assert win._current_path is None, "Example must open as a NEW untitled circuit"
+    assert "Untitled" in win.windowTitle(), f"Title must be Untitled, got {win.windowTitle()}"
+    assert len(win.circuit_scene.placed_items) >= 4, "Loaded example must have components on canvas"
 
 
-def test_task4_zoom_to_fit_and_shortcuts() -> None:
+def test_task4_zoom_to_fit_and_shortcuts(qapp) -> None:
     """Task 4: Zoom to fit (Ctrl+0), shortcuts (F5, F6, Shift+F5), no duplicate shortcuts,
 
     zoom to fit does not change sceneRect or move parts, and shortcuts shown in info panel.
     """
-    script = """
-import sys
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication
-from circuitsim.app.main_window import MainWindow
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QAction
+    from circuitsim.app.main_window import MainWindow
 
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
-win.resize(1024, 768)
-win.show()
-app.processEvents()
+    win = MainWindow()
+    win.resize(1024, 768)
+    win.show()
+    qapp.processEvents()
 
-# 1. No two actions share a shortcut
-all_actions = win.findChildren(QAction)
-shortcut_map = {}
-for act in all_actions:
-    sc_list = act.shortcuts()
-    single_sc = act.shortcut()
-    combined = list(sc_list)
-    if not single_sc.isEmpty() and single_sc not in combined:
-        combined.append(single_sc)
-    unique_keys = set(sc.toString() for sc in combined if sc.toString())
-    for key_str in unique_keys:
-        if key_str in shortcut_map:
-            other_act = shortcut_map[key_str]
-            assert other_act is act, (
-                f"Duplicate shortcut '{key_str}' shared by '{other_act.text()}' and '{act.text()}'"
-            )
-        shortcut_map[key_str] = act
+    # 1. No two actions share a shortcut
+    all_actions = win.findChildren(QAction)
+    shortcut_map = {}
+    for act in all_actions:
+        sc_list = act.shortcuts()
+        single_sc = act.shortcut()
+        combined = list(sc_list)
+        if not single_sc.isEmpty() and single_sc not in combined:
+            combined.append(single_sc)
+        unique_keys = set(sc.toString() for sc in combined if sc.toString())
+        for key_str in unique_keys:
+            if key_str in shortcut_map:
+                other_act = shortcut_map[key_str]
+                assert other_act is act, (
+                    f"Duplicate shortcut '{key_str}' shared by '{other_act.text()}' and '{act.text()}'"
+                )
+            shortcut_map[key_str] = act
 
-# 2. Check specific shortcuts and tooltips
-assert win.act_run.shortcut().toString() == "F5"
-assert "F5" in win.act_run.toolTip()
-assert win.act_pause.shortcut().toString() == "F6"
-assert "F6" in win.act_pause.toolTip()
-assert win.act_stop.shortcut().toString() == "Shift+F5"
-assert "Shift+F5" in win.act_stop.toolTip()
-assert win.act_zoom_fit.shortcut().toString() == "Ctrl+0"
-assert "Ctrl+0" in win.act_zoom_fit.toolTip()
+    # 2. Check specific shortcuts and tooltips
+    assert win.act_run.shortcut().toString() == "F5"
+    assert "F5" in win.act_run.toolTip()
+    assert win.act_pause.shortcut().toString() == "F6"
+    assert "F6" in win.act_pause.toolTip()
+    assert win.act_stop.shortcut().toString() == "Shift+F5"
+    assert "Shift+F5" in win.act_stop.toolTip()
+    assert win.act_zoom_fit.shortcut().toString() == "Ctrl+0"
+    assert "Ctrl+0" in win.act_zoom_fit.toolTip()
 
-# 3. Check shortcuts help text in info panel
-info_text = win.info_label.text()
-assert "F5" in info_text
-assert "F6" in info_text
-assert "Shift+F5" in info_text
-assert "Ctrl+0" in info_text
+    # 3. Check shortcuts help text in info panel
+    info_text = win.info_label.text()
+    assert "F5" in info_text
+    assert "F6" in info_text
+    assert "Shift+F5" in info_text
+    assert "Ctrl+0" in info_text
 
-# 4. Zoom to fit on empty circuit resets to 100%
-view = win.circuit_view
-scene = win.circuit_scene
-view.scale(2.0, 2.0)
-view.zoom_to_fit()
-assert abs(view.zoom_factor - 1.0) < 1e-4, f"Empty circuit zoom must reset to 1.0, got {view.zoom_factor}"
+    # 4. Zoom to fit on empty circuit resets to 100%
+    view = win.circuit_view
+    scene = win.circuit_scene
+    view.scale(2.0, 2.0)
+    view.zoom_to_fit()
+    assert abs(view.zoom_factor - 1.0) < 1e-4, f"Empty circuit zoom must reset to 1.0, got {view.zoom_factor}"
 
-# 5. Zoom to fit on circuit with parts
-r1 = scene.place_new_component("resistor", QPointF(-200.0, -150.0))
-r2 = scene.place_new_component("resistor", QPointF(200.0, 150.0))
-app.processEvents()
+    # 5. Zoom to fit on circuit with parts
+    r1 = scene.place_new_component("resistor", QPointF(-200.0, -150.0))
+    r2 = scene.place_new_component("resistor", QPointF(200.0, 150.0))
+    qapp.processEvents()
 
-scene_rect_before = scene.sceneRect()
-pos_r1_before = (r1.pos().x(), r1.pos().y())
-pos_r2_before = (r2.pos().x(), r2.pos().y())
+    scene_rect_before = scene.sceneRect()
+    pos_r1_before = (r1.pos().x(), r1.pos().y())
+    pos_r2_before = (r2.pos().x(), r2.pos().y())
 
-view.zoom_to_fit()
-app.processEvents()
+    view.zoom_to_fit()
+    qapp.processEvents()
 
-# Assert sceneRect and part positions are strictly unchanged
-assert scene.sceneRect() == scene_rect_before, "zoom_to_fit must NOT modify sceneRect"
-assert (r1.pos().x(), r1.pos().y()) == pos_r1_before, "zoom_to_fit must NOT move part R1"
-assert (r2.pos().x(), r2.pos().y()) == pos_r2_before, "zoom_to_fit must NOT move part R2"
-
-# View transform must be adapted to fit parts with margin
-assert view.zoom_factor != 1.0 or view.view_center() != (0.0, 0.0), "zoom_to_fit must change view viewport/zoom"
-
-print("TASK4_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK4_OK" in res.stdout
+    assert scene.sceneRect() == scene_rect_before, "zoom_to_fit must NOT modify sceneRect"
+    assert (r1.pos().x(), r1.pos().y()) == pos_r1_before, "zoom_to_fit must NOT move part R1"
+    assert (r2.pos().x(), r2.pos().y()) == pos_r2_before, "zoom_to_fit must NOT move part R2"
+    assert view.zoom_factor != 1.0 or view.view_center() != (0.0, 0.0), "zoom_to_fit must change view viewport/zoom"
 
 
-def test_task5_hover_tooltips_with_live_values() -> None:
+def test_task5_hover_tooltips_with_live_values(qapp) -> None:
     """Task 5: Hover tooltips with live values for parts and terminals.
 
     Hand-calculated values:
@@ -442,155 +353,125 @@ def test_task5_hover_tooltips_with_live_values() -> None:
         - Layout invariance:
           * sceneRect, part positions, scrollbars, and zoom are strictly unchanged by tooltips.
     """
-    script = """
-import sys
-from PySide6.QtCore import QPoint, QPointF
-from PySide6.QtGui import QHelpEvent
-from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QHelpEvent
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.engine.simulation_session import ComponentTelemetry, SimulationFrame, SimulationState
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.engine.simulation_session import ComponentTelemetry, SimulationFrame, SimulationState
 
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
-scene = win.circuit_scene
-view = win.circuit_view
+    win = MainWindow()
+    scene = win.circuit_scene
+    view = win.circuit_view
 
-win.show()
-app.processEvents()
+    win.show()
+    qapp.processEvents()
 
-# Place 12 V source, 1 kΩ resistor, and ground
-# V1 pos at (-40, 100), neg at (40, 100)
-# R1 a at (-40, -100), b at (40, -100)
-# GND gnd at (40, 100)
-v1 = scene.place_new_component("dc_voltage", QPointF(0.0, 100.0))
-v1.component.dc_voltage = 12.0
-r1 = scene.place_new_component("resistor", QPointF(0.0, -100.0))
-r1.component.resistance = 1000.0
-gnd = scene.place_new_component("ground", QPointF(40.0, 140.0))
+    v1 = scene.place_new_component("dc_voltage", QPointF(0.0, 100.0))
+    v1.component.dc_voltage = 12.0
+    r1 = scene.place_new_component("resistor", QPointF(0.0, -100.0))
+    r1.component.resistance = 1000.0
+    scene.place_new_component("ground", QPointF(40.0, 140.0))
 
-p_v1 = v1.terminal_scene_positions_px()["pos"]
-p_r1 = r1.terminal_scene_positions_px()["a"]
-n_v1 = v1.terminal_scene_positions_px()["neg"]
-n_r1 = r1.terminal_scene_positions_px()["b"]
-g_gnd = gnd.terminal_scene_positions_px()["gnd"]
+    p_v1 = v1.terminal_scene_positions_px()["pos"]
+    p_r1 = r1.terminal_scene_positions_px()["a"]
+    n_v1 = v1.terminal_scene_positions_px()["neg"]
+    n_r1 = r1.terminal_scene_positions_px()["b"]
 
-# Connect pos to a (node N1 = 12 V) and neg to b + gnd (node 0 = 0 V)
-scene.add_wire((p_v1, p_r1))
-scene.add_wire((n_v1, n_r1))
-app.processEvents()
+    scene.add_wire((p_v1, p_r1))
+    scene.add_wire((n_v1, n_r1))
+    qapp.processEvents()
 
-conn = scene.extract_connectivity_result()
-net_r1_a = conn.component_nodes["R1"]["a"]
-net_r1_b = conn.component_nodes["R1"]["b"]
+    conn = scene.extract_connectivity_result()
+    net_r1_a = conn.component_nodes["R1"]["a"]
+    net_r1_b = conn.component_nodes["R1"]["b"]
 
-# Record baseline canvas state after layout and wire placement
-scene_rect_before = scene.sceneRect()
-pos_r1_before = (r1.pos().x(), r1.pos().y())
-pos_v1_before = (v1.pos().x(), v1.pos().y())
-h_scroll_before = view.horizontalScrollBar().value()
-v_scroll_before = view.verticalScrollBar().value()
-zoom_before = view.zoom_factor
+    scene_rect_before = scene.sceneRect()
+    pos_r1_before = (r1.pos().x(), r1.pos().y())
+    pos_v1_before = (v1.pos().x(), v1.pos().y())
+    h_scroll_before = view.horizontalScrollBar().value()
+    v_scroll_before = view.verticalScrollBar().value()
+    zoom_before = view.zoom_factor
 
-# -----------------------------------------------------------------
-# 1. Stopped state tooltips
-# -----------------------------------------------------------------
-r1_tip_stopped = scene.get_component_tooltip(r1)
-assert "Name: R1" in r1_tip_stopped
-assert "Value: 1 kΩ" in r1_tip_stopped
-assert "Voltage: --" in r1_tip_stopped
-assert "Current: --" in r1_tip_stopped
-assert "Power: --" in r1_tip_stopped
+    # 1. Stopped state tooltips
+    r1_tip_stopped = scene.get_component_tooltip(r1)
+    assert "Name: R1" in r1_tip_stopped
+    assert "Value: 1 kΩ" in r1_tip_stopped
+    assert "Voltage: --" in r1_tip_stopped
+    assert "Current: --" in r1_tip_stopped
+    assert "Power: --" in r1_tip_stopped
 
-v1_tip_stopped = scene.get_component_tooltip(v1)
-assert "Name: V1" in v1_tip_stopped
-assert "Voltage: --" in v1_tip_stopped
+    v1_tip_stopped = scene.get_component_tooltip(v1)
+    assert "Name: V1" in v1_tip_stopped
+    assert "Voltage: --" in v1_tip_stopped
 
-t_tip_stopped = scene.get_terminal_tooltip(r1, "a")
-assert "Terminal: a" in t_tip_stopped
-assert f"Net: {net_r1_a}" in t_tip_stopped
-assert "Node voltage: --" in t_tip_stopped
+    t_tip_stopped = scene.get_terminal_tooltip(r1, "a")
+    assert "Terminal: a" in t_tip_stopped
+    assert f"Net: {net_r1_a}" in t_tip_stopped
+    assert "Node voltage: --" in t_tip_stopped
 
-# -----------------------------------------------------------------
-# 2. Running state tooltips
-# -----------------------------------------------------------------
-# Hand-calculated formula values:
-# I = 12 V / 1000 Ω = 0.012 A (12 mA)
-# P_absorbed_resistor = 12 V * 0.012 A = 0.144 W (144 mW)
-# P_absorbed_source = -0.144 W (-144 mW, delivering)
-frame = SimulationFrame(
-    state=SimulationState.RUNNING,
-    sim_time=0.1,
-    dt=1e-3,
-    speed_ratio=1.0,
-    node_voltages={net_r1_a: 12.0, net_r1_b: 0.0},
-    components={
-        "V1": ComponentTelemetry("V1", "dc_voltage", 12.0, 0.012, -0.144, "12 V"),
-        "R1": ComponentTelemetry("R1", "resistor", 12.0, 0.012, 0.144, "1 kΩ"),
-    },
-)
-scene.apply_simulation_frame(frame)
+    # 2. Running state tooltips
+    frame = SimulationFrame(
+        state=SimulationState.RUNNING,
+        sim_time=0.1,
+        dt=1e-3,
+        speed_ratio=1.0,
+        node_voltages={net_r1_a: 12.0, net_r1_b: 0.0},
+        components={
+            "V1": ComponentTelemetry("V1", "dc_voltage", 12.0, 0.012, -0.144, "12 V"),
+            "R1": ComponentTelemetry("R1", "resistor", 12.0, 0.012, 0.144, "1 kΩ"),
+        },
+    )
+    scene.apply_simulation_frame(frame)
 
-r1_tip_running = scene.get_component_tooltip(r1)
-assert "Name: R1" in r1_tip_running
-assert "12 V" in r1_tip_running
-assert "12 mA" in r1_tip_running
-assert "144 mW" in r1_tip_running
+    r1_tip_running = scene.get_component_tooltip(r1)
+    assert "Name: R1" in r1_tip_running
+    assert "12 V" in r1_tip_running
+    assert "12 mA" in r1_tip_running
+    assert "144 mW" in r1_tip_running
 
-v1_tip_running = scene.get_component_tooltip(v1)
-assert "Name: V1" in v1_tip_running
-assert "12 V" in v1_tip_running
-assert "12 mA" in v1_tip_running
-assert "-144 mW" in v1_tip_running
-assert "(delivering)" in v1_tip_running
-assert "Positive power is absorbed; sources indicate delivered power." in v1_tip_running
+    v1_tip_running = scene.get_component_tooltip(v1)
+    assert "Name: V1" in v1_tip_running
+    assert "12 V" in v1_tip_running
+    assert "12 mA" in v1_tip_running
+    assert "-144 mW" in v1_tip_running
+    assert "(delivering)" in v1_tip_running
+    assert "Positive power is absorbed; sources indicate delivered power." in v1_tip_running
 
-t_tip_running = scene.get_terminal_tooltip(r1, "a")
-assert "Terminal: a" in t_tip_running
-assert f"Net: {net_r1_a}" in t_tip_running
-assert "Node voltage: 12 V" in t_tip_running
+    t_tip_running = scene.get_terminal_tooltip(r1, "a")
+    assert "Terminal: a" in t_tip_running
+    assert f"Net: {net_r1_a}" in t_tip_running
+    assert "Node voltage: 12 V" in t_tip_running
 
-# -----------------------------------------------------------------
-# 3. ViewportEvent QHelpEvent dispatch
-# -----------------------------------------------------------------
-win.show()
-app.processEvents()
+    # 3. ViewportEvent QHelpEvent dispatch
+    win.show()
+    qapp.processEvents()
 
-# Help event on component body
-pos_in_view = view.mapFromScene(r1.pos())
-help_comp = QHelpEvent(QHelpEvent.Type.ToolTip, pos_in_view, view.mapToGlobal(pos_in_view))
-assert view.viewportEvent(help_comp), "CircuitView.viewportEvent should handle component tooltip"
+    pos_in_view = view.mapFromScene(r1.pos())
+    help_comp = QHelpEvent(QHelpEvent.Type.ToolTip, pos_in_view, view.mapToGlobal(pos_in_view))
+    assert view.viewportEvent(help_comp), "CircuitView.viewportEvent should handle component tooltip"
 
-# Help event on terminal
-term_in_view = view.mapFromScene(QPointF(float(p_r1[0]), float(p_r1[1])))
-help_term = QHelpEvent(QHelpEvent.Type.ToolTip, term_in_view, view.mapToGlobal(term_in_view))
-assert view.viewportEvent(help_term), "CircuitView.viewportEvent should handle terminal tooltip"
+    term_in_view = view.mapFromScene(QPointF(float(p_r1[0]), float(p_r1[1])))
+    help_term = QHelpEvent(QHelpEvent.Type.ToolTip, term_in_view, view.mapToGlobal(term_in_view))
+    assert view.viewportEvent(help_term), "CircuitView.viewportEvent should handle terminal tooltip"
 
-app.processEvents()
+    qapp.processEvents()
 
-# -----------------------------------------------------------------
-# 4. Canvas invariance check
-# -----------------------------------------------------------------
-assert scene.sceneRect() == scene_rect_before, "sceneRect must be strictly unchanged by tooltips"
-assert (r1.pos().x(), r1.pos().y()) == pos_r1_before, "R1 position must be strictly unchanged by tooltips"
-assert (v1.pos().x(), v1.pos().y()) == pos_v1_before, "V1 position must be strictly unchanged by tooltips"
-assert view.horizontalScrollBar().value() == h_scroll_before, "Horizontal scrollbar must be unchanged"
-assert view.verticalScrollBar().value() == v_scroll_before, "Vertical scrollbar must be unchanged"
-assert view.zoom_factor == zoom_before, "Zoom factor must be unchanged"
+    # 4. Canvas invariance check
+    assert scene.sceneRect() == scene_rect_before, "sceneRect must be strictly unchanged by tooltips"
+    assert (r1.pos().x(), r1.pos().y()) == pos_r1_before, "R1 position must be strictly unchanged by tooltips"
+    assert (v1.pos().x(), v1.pos().y()) == pos_v1_before, "V1 position must be strictly unchanged by tooltips"
+    assert view.horizontalScrollBar().value() == h_scroll_before, "Horizontal scrollbar must be unchanged"
+    assert view.verticalScrollBar().value() == v_scroll_before, "Vertical scrollbar must be unchanged"
+    assert view.zoom_factor == zoom_before, "Zoom factor must be unchanged"
 
-scene.undo_stack.setClean()
-win._switch_modified = False
-print("TASK5_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK5_OK" in res.stdout
+    scene.undo_stack.setClean()
+    win._switch_modified = False
 
 
-def test_task6_export_schematic() -> None:
+def test_task6_export_schematic(tmp_path: Path, qapp) -> None:
     """Task 6: Export schematic as PNG and SVG.
 
-    Verifications in a single offscreen Qt subprocess:
+    Verifications:
         - PNG dimensions = content bounds + 2 * margin (20 px margin on each side = +40 px).
         - SVG is valid XML parsable by ElementTree, containing component names ("R1", "B1").
         - Selection outlines, hover highlights, and ghost previews are excluded from render,
@@ -598,108 +479,92 @@ def test_task6_export_schematic() -> None:
         - Export options dialog switches between ThemeMode.LIGHT and current theme.
         - Empty schematic export gracefully returns None / False.
     """
-    script = """
-import tempfile
-import xml.etree.ElementTree as ET
-from pathlib import Path
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtWidgets import QApplication
+    import xml.etree.ElementTree as ET
+    from PySide6.QtCore import QPointF, QRectF
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.app.themes import ThemeMode
-from circuitsim.canvas.export import (
-    ExportOptionsDialog,
-    compute_schematic_bounds,
-    export_schematic_to_image,
-    export_schematic_to_svg,
-)
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.themes import ThemeMode
+    from circuitsim.canvas.export import (
+        ExportOptionsDialog,
+        compute_schematic_bounds,
+        export_schematic_to_image,
+        export_schematic_to_svg,
+    )
 
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
-scene = win.circuit_scene
+    win = MainWindow()
+    scene = win.circuit_scene
 
-# 1. Empty circuit check
-assert compute_schematic_bounds(scene) is None
-assert export_schematic_to_image(scene) is None
-with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
-    empty_svg_path = f.name
-assert export_schematic_to_svg(scene, empty_svg_path) is False
+    # 1. Empty circuit check
+    assert compute_schematic_bounds(scene) is None
+    assert export_schematic_to_image(scene) is None
+    empty_svg_path = tmp_path / "empty.svg"
+    assert export_schematic_to_svg(scene, str(empty_svg_path)) is False
 
-# 2. Place components and wire
-r1 = scene.place_new_component("resistor", QPointF(-100.0, 0.0))
-b1 = scene.place_new_component("lightbulb", QPointF(100.0, 0.0))
+    # 2. Place components and wire
+    r1 = scene.place_new_component("resistor", QPointF(-100.0, 0.0))
+    b1 = scene.place_new_component("lightbulb", QPointF(100.0, 0.0))
 
-r1_term_b = r1.terminal_scene_positions_px()["b"]
-b1_term_a = b1.terminal_scene_positions_px()["a"]
-w1 = scene.add_wire((r1_term_b, b1_term_a))
+    r1_term_b = r1.terminal_scene_positions_px()["b"]
+    b1_term_a = b1.terminal_scene_positions_px()["a"]
+    scene.add_wire((r1_term_b, b1_term_a))
 
-# Compute expected content bounds and export rect (+20 px margin on all sides)
-content_rect = QRectF()
-for it in scene.placed_items:
-    content_rect = content_rect.united(it.sceneBoundingRect())
-for w in scene.placed_wires:
-    content_rect = content_rect.united(w.sceneBoundingRect())
+    content_rect = QRectF()
+    for it in scene.placed_items:
+        content_rect = content_rect.united(it.sceneBoundingRect())
+    for w in scene.placed_wires:
+        content_rect = content_rect.united(w.sceneBoundingRect())
 
-margin = 20.0
-expected_w = int(round(content_rect.width() + 2 * margin))
-expected_h = int(round(content_rect.height() + 2 * margin))
+    margin = 20.0
+    expected_w = int(round(content_rect.width() + 2 * margin))
+    expected_h = int(round(content_rect.height() + 2 * margin))
 
-# Set active selection, hover highlight, and ghost item to ensure they are excluded
-r1.setSelected(True)
-assert r1.isSelected()
-scene.update_hover_highlight(QPointF(float(r1_term_b[0]), float(r1_term_b[1])))
-assert scene._hovered_terminal_pt is not None
-scene.show_ghost_preview("voltmeter", QPointF(0.0, 50.0))
-assert scene._ghost_item is not None
+    r1.setSelected(True)
+    assert r1.isSelected()
+    scene.update_hover_highlight(QPointF(float(r1_term_b[0]), float(r1_term_b[1])))
+    assert scene._hovered_terminal_pt is not None
+    scene.show_ghost_preview("voltmeter", QPointF(0.0, 50.0))
+    assert scene._ghost_item is not None
 
-# 3. Export to PNG
-img_white = export_schematic_to_image(scene, margin_px=margin, theme_mode=ThemeMode.LIGHT)
-assert img_white is not None
-assert img_white.width() == expected_w, f"Expected PNG width {expected_w}, got {img_white.width()}"
-assert img_white.height() == expected_h, f"Expected PNG height {expected_h}, got {img_white.height()}"
+    # 3. Export to PNG
+    img_white = export_schematic_to_image(scene, margin_px=margin, theme_mode=ThemeMode.LIGHT)
+    assert img_white is not None
+    assert img_white.width() == expected_w, f"Expected PNG width {expected_w}, got {img_white.width()}"
+    assert img_white.height() == expected_h, f"Expected PNG height {expected_h}, got {img_white.height()}"
 
-# Assert state was restored after export
-assert r1.isSelected(), "Selection must be restored after export"
-assert scene._hovered_terminal_pt is not None, "Hover highlight must be restored after export"
-assert scene._ghost_item is not None and scene._ghost_item.isVisible(), "Ghost item visibility must be restored"
+    assert r1.isSelected(), "Selection must be restored after export"
+    assert scene._hovered_terminal_pt is not None, "Hover highlight must be restored after export"
+    assert scene._ghost_item is not None and scene._ghost_item.isVisible(), "Ghost item visibility must be restored"
 
-# 4. Export to SVG
-with tempfile.NamedTemporaryFile(suffix=".svg", delete=False) as f:
-    svg_path = f.name
+    # 4. Export to SVG
+    svg_path = tmp_path / "export.svg"
+    ok = export_schematic_to_svg(scene, str(svg_path), margin_px=margin, theme_mode=ThemeMode.LIGHT)
+    assert ok is True
 
-ok = export_schematic_to_svg(scene, svg_path, margin_px=margin, theme_mode=ThemeMode.LIGHT)
-assert ok is True
+    svg_text = svg_path.read_text(encoding="utf-8")
+    tree = ET.fromstring(svg_text)
+    assert tree.tag.endswith("svg"), f"Root tag must be SVG, got {tree.tag}"
+    assert "R1" in svg_text, "SVG must contain component label 'R1'"
+    assert "B1" in svg_text, "SVG must contain component label 'B1'"
 
-svg_text = Path(svg_path).read_text(encoding="utf-8")
-tree = ET.fromstring(svg_text)
-assert tree.tag.endswith("svg"), f"Root tag must be SVG, got {tree.tag}"
-assert "R1" in svg_text, "SVG must contain component label 'R1'"
-assert "B1" in svg_text, "SVG must contain component label 'B1'"
+    # 5. Export options dialog
+    dlg = ExportOptionsDialog(ThemeMode.DARK)
+    assert dlg.selected_theme_mode() == ThemeMode.LIGHT
+    dlg.radio_current.setChecked(True)
+    assert dlg.selected_theme_mode() == ThemeMode.DARK
+    dlg.radio_white.setChecked(True)
+    assert dlg.selected_theme_mode() == ThemeMode.LIGHT
 
-# 5. Export options dialog
-dlg = ExportOptionsDialog(ThemeMode.DARK)
-assert dlg.selected_theme_mode() == ThemeMode.LIGHT
-dlg.radio_current.setChecked(True)
-assert dlg.selected_theme_mode() == ThemeMode.DARK
-dlg.radio_white.setChecked(True)
-assert dlg.selected_theme_mode() == ThemeMode.LIGHT
+    # 6. Verify menu actions exist in MainWindow
+    assert win.act_export_png is not None
+    assert win.act_export_svg is not None
+    assert "PNG" in win.act_export_png.text()
+    assert "SVG" in win.act_export_svg.text()
 
-# 6. Verify menu actions exist in MainWindow
-assert win.act_export_png is not None
-assert win.act_export_svg is not None
-assert "PNG" in win.act_export_png.text()
-assert "SVG" in win.act_export_svg.text()
-
-scene.undo_stack.setClean()
-win._switch_modified = False
-print("TASK6_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK6_OK" in res.stdout
+    scene.undo_stack.setClean()
+    win._switch_modified = False
 
 
-def test_task7_about_feedback_and_crash_log() -> None:
+def test_task7_about_feedback_and_crash_log(tmp_path: Path, qapp) -> None:
     """Task 7: About dialog, feedback link, and global crash logging.
 
     Verifications:
@@ -709,36 +574,27 @@ def test_task7_about_feedback_and_crash_log() -> None:
           OS platform, and writes to crash.log in data_dir without raising.
         - Help menu contains 'Report a problem / suggest a feature' and 'About CircuitSim'.
     """
-    script = """
-import sys
-import tempfile
-from pathlib import Path
-from PySide6.QtWidgets import QApplication
+    from circuitsim.app.crash_handler import (
+        ISSUES_URL,
+        REPO_URL,
+        get_app_version,
+        install_global_exception_hook,
+        write_crash_log,
+    )
+    from circuitsim.app.main_window import MainWindow
 
-from circuitsim.app.crash_handler import (
-    ISSUES_URL,
-    REPO_URL,
-    get_app_version,
-    install_global_exception_hook,
-    write_crash_log,
-)
-from circuitsim.app.main_window import MainWindow
+    version = get_app_version()
+    assert version == "0.1.0", f"Expected version '0.1.0', got '{version}'"
+    assert REPO_URL == "https://github.com/EmerikBaltic/circuitsim"
+    assert ISSUES_URL == "https://github.com/EmerikBaltic/circuitsim/issues"
 
-app = QApplication.instance() or QApplication([])
-
-# 1. Version and URL constants
-version = get_app_version()
-assert version == "0.1.0", f"Expected version '0.1.0', got '{version}'"
-assert REPO_URL == "https://github.com/EmerikBaltic/circuitsim"
-assert ISSUES_URL == "https://github.com/EmerikBaltic/circuitsim/issues"
-
-# 2. Crash log writing
-with tempfile.TemporaryDirectory() as tmp_dir:
-    log_dir = Path(tmp_dir)
+    # 2. Crash log writing
+    log_dir1 = tmp_path / "log1"
+    log_dir1.mkdir()
     try:
         raise ValueError("Simulated unexpected test error in circuit simulation")
     except ValueError as exc:
-        log_path = write_crash_log(type(exc), exc, exc.__traceback__, log_dir=log_dir)
+        log_path = write_crash_log(type(exc), exc, exc.__traceback__, log_dir=log_dir1)
 
     assert log_path.exists(), "crash.log must be written"
     content = log_path.read_text(encoding="utf-8")
@@ -752,277 +608,206 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     assert REPO_URL in content
     assert ISSUES_URL in content
 
-# 3. Global exception hook installation & safety
-with tempfile.TemporaryDirectory() as tmp_dir:
-    log_dir = Path(tmp_dir)
-    install_global_exception_hook(log_dir=log_dir)
-    # Trigger exception hook directly: must write log and must not raise
+    # 3. Global exception hook installation & safety
+    log_dir2 = tmp_path / "log2"
+    log_dir2.mkdir()
+    prev_hook = sys.excepthook
     try:
-        raise RuntimeError("Hook verification exception")
-    except RuntimeError as exc:
-        sys.excepthook(type(exc), exc, exc.__traceback__)
+        install_global_exception_hook(log_dir=log_dir2)
+        try:
+            raise RuntimeError("Hook verification exception")
+        except RuntimeError as exc:
+            sys.excepthook(type(exc), exc, exc.__traceback__)
 
-    hook_log = log_dir / "crash.log"
-    assert hook_log.exists(), "crash.log must exist after sys.excepthook invocation"
-    hook_content = hook_log.read_text(encoding="utf-8")
-    assert "Hook verification exception" in hook_content
+        hook_log = log_dir2 / "crash.log"
+        assert hook_log.exists(), "crash.log must exist after sys.excepthook invocation"
+        hook_content = hook_log.read_text(encoding="utf-8")
+        assert "Hook verification exception" in hook_content
+    finally:
+        sys.excepthook = prev_hook
 
-# 4. MainWindow Help menu actions
-win = MainWindow()
-assert win.act_report_issue is not None
-assert "Report a problem" in win.act_report_issue.text()
-assert win.act_about is not None
-assert "About CircuitSim" in win.act_about.text()
+    # 4. MainWindow Help menu actions
+    win = MainWindow()
+    assert win.act_report_issue is not None
+    assert "Report a problem" in win.act_report_issue.text()
+    assert win.act_about is not None
+    assert "About CircuitSim" in win.act_about.text()
 
-scene = win.circuit_scene
-scene.undo_stack.setClean()
-win._switch_modified = False
-print("TASK7_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK7_OK" in res.stdout
-
-
-def test_task8_bulb_burnout_option() -> None:
-    """Task 8: Lightbulb filament burn-out option.
-
-    Hand-calculated verification:
-        - 60 W, 120 V incandescent bulb has R_hot = V^2 / P = 14400 / 60 = 240 Ω.
-        - Powered by 180 V DC source:
-            * Current I = 180 V / 240 Ω = 0.75 A.
-            * Power P = 180 V * 0.75 A = 135 W.
-            * Power ratio P / P_rated = 135 / 60 = 2.25 = 225%.
-            * With burnout_power_ratio = 1.2 (120%) and burnout_time = 0.5 s:
-              Overload threshold (120%) is exceeded by 225% power.
-            * For t < 0.5 s: bulb stays lit and conducts 0.75 A.
-            * After t >= 0.5 s: bulb burns out, model becomes open circuit (R = 1 GΩ),
-              current drops to 180 V / 1e9 Ω = 1.8e-7 A ≈ 0 A.
-            * Canvas diagnostic shows amber status warning: 'B1 burned out'.
-            * When simulation stops, burnout resets.
-        - At rated 120 V (100% power): never burns out.
-        - At 180 V with burnout disabled: never burns out.
-        - QuickValueDialog exposes burnout checkbox (default unchecked) and explanatory hint.
-    """
-    script = """
-import sys
-from PySide6.QtCore import QPointF
-from PySide6.QtWidgets import QApplication, QLabel
-
-from circuitsim.app.main_window import MainWindow
-from circuitsim.components import DCVoltageSource, Ground, Lightbulb
-from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
-from circuitsim.engine import Circuit
-from circuitsim.engine.simulation_session import SimulationSession
-
-app = QApplication.instance() or QApplication([])
-
-# 1. Dialog checks: off by default, hint present, values apply
-b_test = Lightbulb("B_dlg", "1", "0", rated_power=60.0, rated_voltage=120.0)
-dlg = QuickValueDialog(b_test)
-assert dlg.bulb_burnout_cb is not None
-assert dlg.bulb_burnout_cb.isChecked() is False, "burnout_enabled must be off by default"
-assert dlg.burnout_ratio_edit is not None
-assert dlg.burnout_time_edit is not None
-
-labels = dlg.findChildren(QLabel)
-assert any("burn-out" in l.text().lower() or "filament" in l.text().lower() for l in labels)
-
-dlg.bulb_burnout_cb.setChecked(True)
-dlg.burnout_ratio_edit.setText("1.2")
-dlg.burnout_time_edit.setText("0.5s")
-assert dlg._apply_current_inputs()
-assert b_test.burnout_enabled is True
-assert b_test.burnout_power_ratio == 1.2
-assert b_test.burnout_time == 0.5
-
-# 2. Hand-calculated 180 V overload with burnout enabled
-# R = 120^2 / 60 = 240 Ω
-# At 180 V: I = 180 / 240 = 0.75 A, P = 135 W (225% of 60 W)
-# Burnout duration = 0.5 s
-c_overload = Circuit()
-c_overload.add(DCVoltageSource("V1", "1", "0", voltage=180.0))
-bulb_overload = Lightbulb(
-    "B1", "1", "0",
-    rated_power=60.0,
-    rated_voltage=120.0,
-    burnout_enabled=True,
-    burnout_power_ratio=1.2,
-    burnout_time=0.5,
-)
-c_overload.add(bulb_overload)
-c_overload.add(Ground("GND", "0"))
-
-sess = SimulationSession(c_overload, default_dt=0.05)
-sess.start()
-
-# Step 0.4 s (8 steps) -> still conducting 0.75 A
-for _ in range(8):
-    frame = sess.step_chunk(steps=1, dt=0.05)
-assert bulb_overload.burned_out is False
-assert abs(bulb_overload.current - 0.75) < 1e-3
-
-# Step past 0.5 s (4 more steps = 0.6 s total) -> filament burns out!
-for _ in range(4):
-    frame = sess.step_chunk(steps=1, dt=0.05)
-
-assert bulb_overload.burned_out is True
-assert abs(bulb_overload.current) < 1e-6, f"Current must drop to ~0 A, got {bulb_overload.current}"
-
-# Check amber status note
-burn_diags = [d for d in frame.diagnostics if d.code == "bulb_burned_out"]
-assert len(burn_diags) == 1
-assert burn_diags[0].severity == "warning"
-assert burn_diags[0].message == "B1 burned out"
-
-# Stopping simulation resets burnout state
-sess.stop()
-assert bulb_overload.burned_out is False
-
-# 3. Hand-calculated check at rated 120 V: P = 60 W (100% <= 120%) -> never burns out
-c_rated = Circuit()
-c_rated.add(DCVoltageSource("V1", "1", "0", voltage=120.0))
-bulb_rated = Lightbulb(
-    "B2", "1", "0",
-    rated_power=60.0,
-    rated_voltage=120.0,
-    burnout_enabled=True,
-    burnout_power_ratio=1.2,
-    burnout_time=0.5,
-)
-c_rated.add(bulb_rated)
-c_rated.add(Ground("GND", "0"))
-sess_rated = SimulationSession(c_rated, default_dt=0.05)
-sess_rated.start()
-for _ in range(20):
-    sess_rated.step_chunk(steps=1, dt=0.05)
-assert bulb_rated.burned_out is False
-assert abs(bulb_rated.current - 0.5) < 1e-3
-
-# 4. Hand-calculated check at 180 V with burnout disabled -> never burns out
-c_dis = Circuit()
-c_dis.add(DCVoltageSource("V1", "1", "0", voltage=180.0))
-bulb_dis = Lightbulb(
-    "B3", "1", "0",
-    rated_power=60.0,
-    rated_voltage=120.0,
-    burnout_enabled=False,
-    burnout_power_ratio=1.2,
-    burnout_time=0.5,
-)
-c_dis.add(bulb_dis)
-c_dis.add(Ground("GND", "0"))
-sess_dis = SimulationSession(c_dis, default_dt=0.05)
-sess_dis.start()
-for _ in range(20):
-    sess_dis.step_chunk(steps=1, dt=0.05)
-assert bulb_dis.burned_out is False
-assert abs(bulb_dis.current - 0.75) < 1e-3
-
-print("TASK8_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK8_OK" in res.stdout
+    scene = win.circuit_scene
+    scene.undo_stack.setClean()
+    win._switch_modified = False
 
 
-def test_task9_number_format_setting() -> None:
-    """Task 9: Number format preferences (Auto / Dot / Comma).
+def test_task8_bulb_burnout_option(qapp) -> None:
+    """Task 8: Lightbulb filament burn-out option."""
+    from PySide6.QtWidgets import QLabel
 
-    Verifications in a single offscreen Qt subprocess:
-        - Preferences dialog has Number format options: Automatic, Dot, Comma.
-        - Dot mode formats:
-          * 4700 -> "4.7 kΩ"
-          * 0.0047 -> "4.7 mΩ"
-          * 5.65e9 -> "5.65 GHz"
-          * -12.5 -> "-12.5 V"
-        - Comma mode formats:
-          * 4700 -> "4,7 kΩ"
-          * 0.0047 -> "4,7 mΩ"
-          * 5.65e9 -> "5,65 GHz"
-          * -12.5 -> "-12,5 V"
-        - Round-trip parsing: both displayed dot and comma strings parse back to identical values.
-        - Changes persist atomically in AppSettings.
-        - MainWindow has Edit > Preferences action.
-    """
-    script = """
-import sys
-import tempfile
-from pathlib import Path
-from PySide6.QtWidgets import QApplication
+    from circuitsim.components import DCVoltageSource, Ground, Lightbulb
+    from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+    from circuitsim.engine import Circuit
+    from circuitsim.engine.simulation_session import SimulationSession
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.app.settings import AppSettings
-from circuitsim.dialogs.preferences_dialog import PreferencesDialog
-from circuitsim.dialogs.value_parser import (
-    format_engineering_value,
-    get_global_number_format,
-    parse_engineering_value,
-    set_global_number_format,
-)
+    # 1. Dialog checks: off by default, hint present, values apply
+    b_test = Lightbulb("B_dlg", "1", "0", rated_power=60.0, rated_voltage=120.0)
+    dlg = QuickValueDialog(b_test)
+    assert dlg.bulb_burnout_cb is not None
+    assert dlg.bulb_burnout_cb.isChecked() is False, "burnout_enabled must be off by default"
+    assert dlg.burnout_ratio_edit is not None
+    assert dlg.burnout_time_edit is not None
 
-app = QApplication.instance() or QApplication([])
+    labels = dlg.findChildren(QLabel)
+    assert any("burn-out" in lbl.text().lower() or "filament" in lbl.text().lower() for lbl in labels)
 
-# 1. Format test: Dot mode
-set_global_number_format("dot")
-assert format_engineering_value(4700.0, "Ω") == "4.7 kΩ"
-assert format_engineering_value(0.0047, "Ω") == "4.7 mΩ"
-assert format_engineering_value(5.65e9, "Hz") == "5.65 GHz"
-assert format_engineering_value(-12.5, "V") == "-12.5 V"
+    dlg.bulb_burnout_cb.setChecked(True)
+    dlg.burnout_ratio_edit.setText("1.2")
+    dlg.burnout_time_edit.setText("0.5s")
+    assert dlg._apply_current_inputs()
+    assert b_test.burnout_enabled is True
+    assert b_test.burnout_power_ratio == 1.2
+    assert b_test.burnout_time == 0.5
 
-# 2. Format test: Comma mode
-set_global_number_format("comma")
-assert format_engineering_value(4700.0, "Ω") == "4,7 kΩ"
-assert format_engineering_value(0.0047, "Ω") == "4,7 mΩ"
-assert format_engineering_value(5.65e9, "Hz") == "5,65 GHz"
-assert format_engineering_value(-12.5, "V") == "-12,5 V"
+    # 2. Hand-calculated 180 V overload with burnout enabled
+    c_overload = Circuit()
+    c_overload.add(DCVoltageSource("V1", "1", "0", voltage=180.0))
+    bulb_overload = Lightbulb(
+        "B1", "1", "0",
+        rated_power=60.0,
+        rated_voltage=120.0,
+        burnout_enabled=True,
+        burnout_power_ratio=1.2,
+        burnout_time=0.5,
+    )
+    c_overload.add(bulb_overload)
+    c_overload.add(Ground("GND", "0"))
 
-# 3. Round-trip input parser verification (accepts both dot and comma in all modes)
-test_cases = [
-    (4700.0, "Ω"),
-    (0.0047, "Ω"),
-    (5.65e9, "Hz"),
-    (-12.5, "V"),
-]
-for val, unit in test_cases:
-    dot_str = format_engineering_value(val, unit, decimal_separator=".")
-    comma_str = format_engineering_value(val, unit, decimal_separator=",")
-    assert parse_engineering_value(dot_str) == val, f"Failed parsing dot string {dot_str}"
-    assert parse_engineering_value(comma_str) == val, f"Failed parsing comma string {comma_str}"
+    sess = SimulationSession(c_overload, default_dt=0.05)
+    sess.start()
 
-# 4. Preferences dialog and atomic persistence
-with tempfile.TemporaryDirectory() as tmp:
-    s = AppSettings(tmp)
-    dlg = PreferencesDialog(s)
-    assert dlg.combo_number_format.count() >= 3
+    for _ in range(8):
+        frame = sess.step_chunk(steps=1, dt=0.05)
+    assert bulb_overload.burned_out is False
+    assert abs(bulb_overload.current - 0.75) < 1e-3
 
-    # Switch to comma mode
-    idx_comma = dlg.combo_number_format.findData("comma")
-    dlg.combo_number_format.setCurrentIndex(idx_comma)
-    dlg._on_accept()
-    assert s.get_number_format() == "comma"
-    assert get_global_number_format() == "comma"
+    for _ in range(4):
+        frame = sess.step_chunk(steps=1, dt=0.05)
 
-    # Verify persistence on disk reload
-    s_reloaded = AppSettings(tmp)
-    assert s_reloaded.get_number_format() == "comma"
+    assert bulb_overload.burned_out is True
+    assert abs(bulb_overload.current) < 1e-6, f"Current must drop to ~0 A, got {bulb_overload.current}"
 
-# 5. Verify MainWindow action
-win = MainWindow()
-assert win.act_preferences is not None
-assert "Preferences" in win.act_preferences.text()
+    burn_diags = [d for d in frame.diagnostics if d.code == "bulb_burned_out"]
+    assert len(burn_diags) == 1
+    assert burn_diags[0].severity == "warning"
+    assert burn_diags[0].message == "B1 burned out"
 
-scene = win.circuit_scene
-scene.undo_stack.setClean()
-win._switch_modified = False
+    sess.stop()
+    assert bulb_overload.burned_out is False
 
-# Reset back to dot for clean test environment
-set_global_number_format("dot")
-print("TASK9_OK")
-"""
-    res = _run_qt(script)
-    assert res.returncode == 0, f"Qt test failed:\nstdout:\n{res.stdout}\nstderr:\n{res.stderr}"
-    assert "TASK9_OK" in res.stdout
+    # 3. Hand-calculated check at rated 120 V
+    c_rated = Circuit()
+    c_rated.add(DCVoltageSource("V1", "1", "0", voltage=120.0))
+    bulb_rated = Lightbulb(
+        "B2", "1", "0",
+        rated_power=60.0,
+        rated_voltage=120.0,
+        burnout_enabled=True,
+        burnout_power_ratio=1.2,
+        burnout_time=0.5,
+    )
+    c_rated.add(bulb_rated)
+    c_rated.add(Ground("GND", "0"))
+    sess_rated = SimulationSession(c_rated, default_dt=0.05)
+    sess_rated.start()
+    for _ in range(20):
+        sess_rated.step_chunk(steps=1, dt=0.05)
+    assert bulb_rated.burned_out is False
+    assert abs(bulb_rated.current - 0.5) < 1e-3
+
+    # 4. Hand-calculated check at 180 V with burnout disabled
+    c_dis = Circuit()
+    c_dis.add(DCVoltageSource("V1", "1", "0", voltage=180.0))
+    bulb_dis = Lightbulb(
+        "B3", "1", "0",
+        rated_power=60.0,
+        rated_voltage=120.0,
+        burnout_enabled=False,
+        burnout_power_ratio=1.2,
+        burnout_time=0.5,
+    )
+    c_dis.add(bulb_dis)
+    c_dis.add(Ground("GND", "0"))
+    sess_dis = SimulationSession(c_dis, default_dt=0.05)
+    sess_dis.start()
+    for _ in range(20):
+        sess_dis.step_chunk(steps=1, dt=0.05)
+    assert bulb_dis.burned_out is False
+    assert abs(bulb_dis.current - 0.75) < 1e-3
+
+
+def test_task9_number_format_setting(tmp_path: Path, qapp) -> None:
+    """Task 9: Number format preferences (Auto / Dot / Comma)."""
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.settings import AppSettings
+    from circuitsim.dialogs.preferences_dialog import PreferencesDialog
+    from circuitsim.dialogs.value_parser import (
+        format_engineering_value,
+        get_global_number_format,
+        parse_engineering_value,
+        set_global_number_format,
+    )
+
+    prev_fmt = get_global_number_format()
+    try:
+        # 1. Format test: Dot mode
+        set_global_number_format("dot")
+        assert format_engineering_value(4700.0, "Ω") == "4.7 kΩ"
+        assert format_engineering_value(0.0047, "Ω") == "4.7 mΩ"
+        assert format_engineering_value(5.65e9, "Hz") == "5.65 GHz"
+        assert format_engineering_value(-12.5, "V") == "-12.5 V"
+
+        # 2. Format test: Comma mode
+        set_global_number_format("comma")
+        assert format_engineering_value(4700.0, "Ω") == "4,7 kΩ"
+        assert format_engineering_value(0.0047, "Ω") == "4,7 mΩ"
+        assert format_engineering_value(5.65e9, "Hz") == "5,65 GHz"
+        assert format_engineering_value(-12.5, "V") == "-12,5 V"
+
+        # 3. Round-trip input parser verification
+        test_cases = [
+            (4700.0, "Ω"),
+            (0.0047, "Ω"),
+            (5.65e9, "Hz"),
+            (-12.5, "V"),
+        ]
+        for val, unit in test_cases:
+            dot_str = format_engineering_value(val, unit, decimal_separator=".")
+            comma_str = format_engineering_value(val, unit, decimal_separator=",")
+            assert parse_engineering_value(dot_str) == val, f"Failed parsing dot string {dot_str}"
+            assert parse_engineering_value(comma_str) == val, f"Failed parsing comma string {comma_str}"
+
+        # 4. Preferences dialog and atomic persistence
+        s = AppSettings(tmp_path)
+        dlg = PreferencesDialog(s)
+        assert dlg.combo_number_format.count() >= 3
+
+        idx_comma = dlg.combo_number_format.findData("comma")
+        dlg.combo_number_format.setCurrentIndex(idx_comma)
+        dlg._on_accept()
+        assert s.get_number_format() == "comma"
+        assert get_global_number_format() == "comma"
+
+        s_reloaded = AppSettings(tmp_path)
+        assert s_reloaded.get_number_format() == "comma"
+
+        # 5. Verify MainWindow action
+        win = MainWindow()
+        assert win.act_preferences is not None
+        assert "Preferences" in win.act_preferences.text()
+
+        scene = win.circuit_scene
+        scene.undo_stack.setClean()
+        win._switch_modified = False
+    finally:
+        set_global_number_format(prev_fmt)
 
 
 def test_task10_continuous_integration() -> None:

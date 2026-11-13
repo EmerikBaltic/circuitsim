@@ -111,130 +111,93 @@ def test_led_over_current_and_burnout() -> None:
     assert led.is_over_current is False
 
 
-def test_led_live_tooltip() -> None:
+def test_led_live_tooltip(qapp) -> None:
     """Verify LED tooltip formatting with colour, voltage, current, and state."""
-    script = """
-import sys
-from PySide6.QtWidgets import QApplication
-from circuitsim.canvas.component_item import ComponentItem
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.components import LED
+    from circuitsim.canvas.component_item import ComponentItem
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
 
-app = QApplication.instance() or QApplication([])
-led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Pure green", color="#00E676")
-item = ComponentItem(led, SymbolLibrary())
+    led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Pure green", color="#00E676")
+    item = ComponentItem(led, SymbolLibrary())
 
-# Stopped state
-tt_stopped = item.get_live_tooltip(is_running=False)
-assert "Name: D1" in tt_stopped
-assert "Colour: Pure green" in tt_stopped
-assert "Voltage: --" in tt_stopped
-assert "Current: --" in tt_stopped
-assert "State: Off" in tt_stopped
+    tt_stopped = item.get_live_tooltip(is_running=False)
+    assert "Name: D1" in tt_stopped
+    assert "Colour: Pure green" in tt_stopped
+    assert "Voltage: --" in tt_stopped
+    assert "Current: --" in tt_stopped
+    assert "State: Off" in tt_stopped
 
-# Running state conducting
-led.voltage = 2.05
-led.current = 0.020
-led.brightness = 1.0
-tt_running = item.get_live_tooltip(is_running=True)
-assert "Voltage: 2.05 V" in tt_running
-assert "Current: 20 mA" in tt_running
-assert "State: On" in tt_running
+    led.voltage = 2.05
+    led.current = 0.020
+    led.brightness = 1.0
+    tt_running = item.get_live_tooltip(is_running=True)
+    assert "Voltage: 2.05 V" in tt_running
+    assert "Current: 20 mA" in tt_running
+    assert "State: On" in tt_running
 
-# Running state over-current
-led.is_over_current = True
-tt_over = item.get_live_tooltip(is_running=True)
-assert "State: Over-current" in tt_over
+    led.is_over_current = True
+    tt_over = item.get_live_tooltip(is_running=True)
+    assert "State: Over-current" in tt_over
 
-# Running state burned out
-led.burned_out = True
-tt_burned = item.get_live_tooltip(is_running=True)
-assert "State: Burned out" in tt_burned
+    led.burned_out = True
+    tt_burned = item.get_live_tooltip(is_running=True)
+    assert "State: Burned out" in tt_burned
 
-# Reverse biased
-led.burned_out = False
-led.is_over_current = False
-led.voltage = -3.5
-led.current = 0.0
-led.brightness = 0.0
-tt_rev = item.get_live_tooltip(is_running=True)
-assert "State: Reverse-biased" in tt_rev
-"""
-    proc = _run_qt_script(script)
-    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    led.burned_out = False
+    led.is_over_current = False
+    led.voltage = -3.5
+    led.current = 0.0
+    led.brightness = 0.0
+    tt_rev = item.get_live_tooltip(is_running=True)
+    assert "State: Reverse-biased" in tt_rev
 
 
-def test_offscreen_led_drawing_glow_and_burned_out_cross() -> None:
+def test_offscreen_led_drawing_glow_and_burned_out_cross(qapp) -> None:
     """Offscreen Qt test: verify LED rendering, glow painting, burned-out dark body with cross, and diagnostic outlines."""
-    script = """
-import sys
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QApplication
+    import numpy as np
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage, QPainter
+    from circuitsim.canvas.component_item import ComponentItem
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
 
-from circuitsim.canvas.component_item import ComponentItem
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.components import LED
+    library = SymbolLibrary()
 
-app = QApplication.instance() or QApplication([])
+    led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Red", color="#FF3B30")
+    led.voltage = 2.0
+    led.current = 0.020
+    led.brightness = 1.0
+    item = ComponentItem(led, library)
 
-library = SymbolLibrary()
+    img_lit = QImage(120, 80, QImage.Format.Format_ARGB32_Premultiplied)
+    img_lit.fill(Qt.GlobalColor.black)
+    p = QPainter(img_lit)
+    p.translate(60.0, 40.0)
+    item.paint(p, None, None)
+    p.end()
 
-# 1. Normal lit LED
-led = LED("D1", "n1", "0", forward_voltage=2.0, color_name="Red", color="#FF3B30")
-led.voltage = 2.0
-led.current = 0.020
-led.brightness = 1.0
-item = ComponentItem(led, library)
+    arr_lit = np.frombuffer(img_lit.constBits(), dtype=np.uint8).reshape((80, img_lit.bytesPerLine() // 4, 4))
+    roi_lit = arr_lit[20:60, 30:90, :]
+    lit_pixels = int(np.count_nonzero((roi_lit[:, :, 2] > 80) & (roi_lit[:, :, 1] < 60) & (roi_lit[:, :, 0] < 60)))
+    assert lit_pixels > 50, f"Expected red glow pixels, found {lit_pixels}"
 
-img_lit = QImage(120, 80, QImage.Format.Format_ARGB32_Premultiplied)
-img_lit.fill(Qt.GlobalColor.black)
-p = QPainter(img_lit)
-p.translate(60.0, 40.0)
-item.paint(p, None, None)
-p.end()
+    led_burned = LED("D2", "n1", "0", forward_voltage=2.0, burnout_enabled=True)
+    led_burned.burned_out = True
+    item_burned = ComponentItem(led_burned, library)
+    assert item_burned.symbol_state == "burned_out"
 
-# Verify red glow pixels exist in img_lit (around (60, 40))
-lit_pixels = 0
-for x in range(30, 90):
-    for y in range(20, 60):
-        c = img_lit.pixelColor(x, y)
-        if c.red() > 80 and c.green() < 60 and c.blue() < 60:
-            lit_pixels += 1
-assert lit_pixels > 50, f"Expected red glow pixels, found {lit_pixels}"
+    img_burned = QImage(120, 80, QImage.Format.Format_ARGB32_Premultiplied)
+    img_burned.fill(Qt.GlobalColor.white)
+    p2 = QPainter(img_burned)
+    p2.translate(60.0, 40.0)
+    item_burned.paint(p2, None, None)
+    p2.end()
 
-# 2. Burned-out LED
-led_burned = LED("D2", "n1", "0", forward_voltage=2.0, burnout_enabled=True)
-led_burned.burned_out = True
-item_burned = ComponentItem(led_burned, library)
-assert item_burned.symbol_state == "burned_out"
+    arr_b = np.frombuffer(img_burned.constBits(), dtype=np.uint8).reshape((80, img_burned.bytesPerLine() // 4, 4))
+    roi_b = arr_b[30:50, 50:70, :]
+    dark_pixels = int(np.count_nonzero((roi_b[:, :, 2] < 60) & (roi_b[:, :, 1] < 60) & (roi_b[:, :, 0] < 60)))
+    assert dark_pixels > 30, f"Expected dark body pixels in burned out LED, found {dark_pixels}"
 
-img_burned = QImage(120, 80, QImage.Format.Format_ARGB32_Premultiplied)
-img_burned.fill(Qt.GlobalColor.white)
-p2 = QPainter(img_burned)
-p2.translate(60.0, 40.0)
-item_burned.paint(p2, None, None)
-p2.end()
+    item.set_diagnostic("error", "Error test")
+    assert item.diagnostic_severity == "error"
 
-# Verify dark body pixels exist in burned LED image
-dark_pixels = 0
-for x in range(50, 70):
-    for y in range(30, 50):
-        c = img_burned.pixelColor(x, y)
-        # Dark body color is around #2D2D2D (rgb ~ 45, 45, 45)
-        if c.red() < 60 and c.green() < 60 and c.blue() < 60:
-            dark_pixels += 1
-assert dark_pixels > 30, f"Expected dark body pixels in burned out LED, found {dark_pixels}"
-
-# 3. Diagnostic outline: error -> red stroke, warning -> amber stroke
-item.set_diagnostic("error", "Error test")
-assert item.diagnostic_severity == "error"
-
-item.set_diagnostic("warning", "Warning test")
-assert item.diagnostic_severity == "warning"
-
-print("OFFSCREEN_LED_DRAWING_OK")
-"""
-    res = _run_qt_script(script)
-    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "OFFSCREEN_LED_DRAWING_OK" in res.stdout
+    item.set_diagnostic("warning", "Warning test")
+    assert item.diagnostic_severity == "warning"

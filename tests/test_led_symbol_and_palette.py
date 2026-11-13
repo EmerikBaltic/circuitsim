@@ -117,126 +117,89 @@ def test_led_marks_hand_worked_all_8_orientations(
     assert dist_flat_to_cathode < dist_flat_to_anode
 
 
-def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=25,
-    )
-
-
-def test_led_palette_entry_and_metadata() -> None:
+def test_led_palette_entry_and_metadata(qapp) -> None:
     """Verify LED palette category 'Semiconductors', metadata terminals, and factory model creation."""
-    script = """
-import sys
-from circuitsim.app.palette_dock import CATEGORY_ORDER, COMPONENT_ORDER_IN_CATEGORY
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.components import LED, create_default_component_model
+    from circuitsim.app.palette_dock import CATEGORY_ORDER, COMPONENT_ORDER_IN_CATEGORY
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    from circuitsim.components import LED, create_default_component_model
 
-assert "Semiconductors" in CATEGORY_ORDER
-assert "led" in COMPONENT_ORDER_IN_CATEGORY["Semiconductors"]
+    assert "Semiconductors" in CATEGORY_ORDER
+    assert "led" in COMPONENT_ORDER_IN_CATEGORY["Semiconductors"]
 
-lib = SymbolLibrary()
-catalog = lib.metadata_catalog
-assert "led" in catalog
-meta = catalog["led"]
-assert meta.category == "Semiconductors"
-assert meta.grid_size == (4, 2)
-assert meta.pixel_size == (80, 40)
+    lib = SymbolLibrary()
+    catalog = lib.metadata_catalog
+    assert "led" in catalog
+    meta = catalog["led"]
+    assert meta.category == "Semiconductors"
+    assert meta.grid_size == (4, 2)
+    assert meta.pixel_size == (80, 40)
 
-term_names = [t.name for t in meta.terminals]
-assert term_names == ["anode", "cathode"]
+    term_names = [t.name for t in meta.terminals]
+    assert term_names == ["anode", "cathode"]
 
-anode_vb = meta.terminal_in_svg_viewbox(meta.terminals[0])
-cathode_vb = meta.terminal_in_svg_viewbox(meta.terminals[1])
-assert anode_vb == (0.0, 20.0)
-assert cathode_vb == (80.0, 20.0)
+    anode_vb = meta.terminal_in_svg_viewbox(meta.terminals[0])
+    cathode_vb = meta.terminal_in_svg_viewbox(meta.terminals[1])
+    assert anode_vb == (0.0, 20.0)
+    assert cathode_vb == (80.0, 20.0)
 
-comp = create_default_component_model("led", "D1")
-assert isinstance(comp, LED)
-assert comp.name == "D1"
-assert comp.forward_voltage == 2.0
-assert comp.color_name == "Red"
-"""
-    proc = _run_qt_script(script)
-    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    comp = create_default_component_model("led", "D1")
+    assert isinstance(comp, LED)
+    assert comp.name == "D1"
+    assert comp.forward_voltage == 2.0
+    assert comp.color_name == "Red"
 
 
-def test_offscreen_led_rendering_flat_centroid_nearer_cathode_all_8_orientations() -> None:
+def test_offscreen_led_rendering_flat_centroid_nearer_cathode_all_8_orientations(qapp) -> None:
     """Offscreen Qt test: render LED across all 8 orientations and verify cathode flat centroid is nearer cathode."""
-    script = """
-import math
-import sys
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QApplication
+    import numpy as np
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage, QPainter
+    from circuitsim.canvas.symbol_geometry import led_marks
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
 
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.canvas.symbol_geometry import led_marks
+    lib = SymbolLibrary()
+    flat_highlight_color = "#FF1744"
 
-app = QApplication.instance() or QApplication([])
-lib = SymbolLibrary()
+    for rot in (0, 90, 180, 270):
+        for flipped in (False, True):
+            img = QImage(120, 120, QImage.Format.Format_ARGB32)
+            img.fill(Qt.GlobalColor.black)
 
-flat_highlight_color = "#FF1744"  # Distinct red to isolate cathode flat pixels
+            p = QPainter(img)
+            p.translate(60.0, 60.0)
+            if flipped:
+                p.scale(-1.0, 1.0)
+            if rot:
+                p.rotate(float(rot))
 
-for rot in (0, 90, 180, 270):
-    for flipped in (False, True):
-        img = QImage(120, 120, QImage.Format.Format_ARGB32)
-        img.fill(Qt.GlobalColor.black)
+            lib.paint_symbol(
+                p,
+                "led",
+                stroke_color="#FFFFFF",
+                polarity_color=flat_highlight_color,
+                rotation_deg=rot,
+                flipped_h=flipped,
+            )
+            p.end()
 
-        p = QPainter(img)
-        p.translate(60.0, 60.0)
+            arr = np.frombuffer(img.constBits(), dtype=np.uint8).reshape((120, img.bytesPerLine() // 4, 4))
+            b, g, r = arr[:, :120, 0], arr[:, :120, 1], arr[:, :120, 2]
+            ys, xs = np.nonzero((r > 200) & (g < 50) & (b < 100))
+            assert len(xs) > 0, (
+                f"No cathode flat pixels found for LED (rot={rot}, flipped={flipped})"
+            )
 
-        # Match ComponentItem.paint() transform order
-        if flipped:
-            p.scale(-1.0, 1.0)
-        if rot:
-            p.rotate(float(rot))
+            centroid_x = float(xs.mean())
+            centroid_y = float(ys.mean())
+            marks = led_marks(rot, flipped, center_px=(60.0, 60.0))
+            anode_x, anode_y = marks["anode_terminal"]
+            cathode_x, cathode_y = marks["cathode_terminal"]
 
-        # Render symbol with flat line painted in flat_highlight_color
-        lib.paint_symbol(
-            p,
-            "led",
-            stroke_color="#FFFFFF",
-            polarity_color=flat_highlight_color,
-            rotation_deg=rot,
-            flipped_h=flipped,
-        )
-        p.end()
+            dist_to_cathode = math.hypot(centroid_x - cathode_x, centroid_y - cathode_y)
+            dist_to_anode = math.hypot(centroid_x - anode_x, centroid_y - anode_y)
 
-        # Find all pixels painted with flat_highlight_color
-        flat_pixels = []
-        for y in range(img.height()):
-            for x in range(img.width()):
-                col = img.pixelColor(x, y)
-                if col.red() > 200 and col.green() < 50 and col.blue() < 100:
-                    flat_pixels.append((x, y))
-
-        assert len(flat_pixels) > 0, (
-            f"No cathode flat pixels found for LED (rot={rot}, flipped={flipped})"
-        )
-
-        # Centroid of the cathode flat pixels
-        centroid_x = sum(x for x, y in flat_pixels) / len(flat_pixels)
-        centroid_y = sum(y for x, y in flat_pixels) / len(flat_pixels)
-
-        # Transformed terminal coordinates with center at (60, 60)
-        marks = led_marks(rot, flipped, center_px=(60.0, 60.0))
-        anode_x, anode_y = marks["anode_terminal"]
-        cathode_x, cathode_y = marks["cathode_terminal"]
-
-        dist_to_cathode = math.hypot(centroid_x - cathode_x, centroid_y - cathode_y)
-        dist_to_anode = math.hypot(centroid_x - anode_x, centroid_y - anode_y)
-
-        assert dist_to_cathode < dist_to_anode, (
-            f"Cathode flat inverted! For rot={rot}, flip={flipped}: "
-            f"Flat centroid ({centroid_x:.1f}, {centroid_y:.1f}) is nearer anode ({dist_to_anode:.1f}) "
-            f"than cathode ({dist_to_cathode:.1f}). Anode=({anode_x}, {anode_y}), Cathode=({cathode_x}, {cathode_y})"
-        )
-"""
-    res = _run_qt_script(script)
-    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+            assert dist_to_cathode < dist_to_anode, (
+                f"Cathode flat inverted! For rot={rot}, flip={flipped}: "
+                f"Flat centroid ({centroid_x:.1f}, {centroid_y:.1f}) is nearer anode ({dist_to_anode:.1f}) "
+                f"than cathode ({dist_to_cathode:.1f}). Anode=({anode_x}, {anode_y}), Cathode=({cathode_x}, {cathode_y})"
+            )

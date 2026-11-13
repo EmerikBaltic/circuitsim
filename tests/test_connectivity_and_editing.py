@@ -27,10 +27,12 @@ from circuitsim.components import (
 from circuitsim.engine import Circuit, MNASolver, NoGroundError
 
 
+from conftest import assert_module_has_no_qt_imports
+
+
 def test_no_qt_imports_in_connectivity_module() -> None:
     """Rule 4: Verify circuitsim.canvas.connectivity has zero PySide6 imports."""
-    qt_modules = [m for m in sys.modules if m.startswith("PySide6")]
-    assert qt_modules == []
+    assert_module_has_no_qt_imports("circuitsim.canvas.connectivity")
 
 
 def test_voltage_divider_built_through_extractor_matches_analytic_and_hand_built() -> None:
@@ -293,101 +295,83 @@ def test_missing_ground_raises_no_ground_connected() -> None:
         MNASolver(extracted.circuit).solve_dc()
 
 
-def test_undo_redo_and_attached_wire_deletion_in_circuit_scene() -> None:
+def test_undo_redo_and_attached_wire_deletion_in_circuit_scene(qapp) -> None:
     """Rules 2, 5, 6: Full QUndoStack undo/redo for add, wire, move, rotate, flip, delete, copy/paste."""
-    # Run in an isolated offscreen subprocess so the main pytest process stays 100% free of PySide6 imports
-    script = textwrap.dedent(
-        """
-        import math
-        import os
-        import sys
-        os.environ["QT_QPA_PLATFORM"] = "offscreen"
-        from PySide6.QtCore import QPointF
-        from PySide6.QtWidgets import QApplication
-        from circuitsim.canvas.scene import CircuitScene
-        from circuitsim.canvas.symbol_renderer import SymbolLibrary
-        from circuitsim.engine import MNASolver
+    from PySide6.QtCore import QPointF
+    from circuitsim.canvas.scene import CircuitScene
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    from circuitsim.engine import MNASolver
 
-        app = QApplication.instance() or QApplication(sys.argv)
-        scene = CircuitScene(SymbolLibrary())
+    scene = CircuitScene(SymbolLibrary())
 
-        # 1. Place V1 (12 V), R1 (1 kOhm), GND1
-        v1_item = scene.place_new_component("dc_voltage", QPointF(0.0, 0.0))
-        r1_item = scene.place_new_component("resistor", QPointF(0.0, -60.0))
-        gnd_item = scene.place_new_component("ground", QPointF(40.0, 40.0))
-        assert len(scene.placed_items) == 3
+    # 1. Place V1 (12 V), R1 (1 kOhm), GND1
+    scene.place_new_component("dc_voltage", QPointF(0.0, 0.0))
+    r1_item = scene.place_new_component("resistor", QPointF(0.0, -60.0))
+    scene.place_new_component("ground", QPointF(40.0, 40.0))
+    assert len(scene.placed_items) == 3
 
-        # 2. Wire them up
-        w1 = scene.add_routed_wire((-40, 0), (-40, -60))
-        w2 = scene.add_routed_wire((40, 0), (40, -60))
-        w3 = scene.add_routed_wire((40, 0), (40, 20))
-        assert len(scene.placed_wires) == 3
+    # 2. Wire them up
+    w1 = scene.add_routed_wire((-40, 0), (-40, -60))
+    w2 = scene.add_routed_wire((40, 0), (40, -60))
+    w3 = scene.add_routed_wire((40, 0), (40, 20))
+    assert len(scene.placed_wires) == 3
 
-        c_init = scene.build_circuit()
-        sol_init = MNASolver(c_init).solve_dc()
-        assert math.isclose(abs(c_init.get_component("R1").current), 0.012, rel_tol=1e-7)
+    c_init = scene.build_circuit()
+    sol_init = MNASolver(c_init).solve_dc()
+    assert math.isclose(abs(c_init.get_component("R1").current), 0.012, rel_tol=1e-7)
 
-        # 3. Move R1 up by 40 px: attached wires w1 and w2 re-route automatically and keep connectivity
-        scene.move_components_by([r1_item], 0.0, -40.0)
-        assert r1_item.pos() == QPointF(0.0, -100.0)
-        assert w1.points[-1] == (-40, -100)
-        assert w2.points[-1] == (40, -100)
-        c_moved = scene.build_circuit()
-        MNASolver(c_moved).solve_dc()
-        assert math.isclose(abs(c_moved.get_component("R1").current), 0.012, rel_tol=1e-7)
+    # 3. Move R1 up by 40 px: attached wires w1 and w2 re-route automatically and keep connectivity
+    scene.move_components_by([r1_item], 0.0, -40.0)
+    assert r1_item.pos() == QPointF(0.0, -100.0)
+    assert w1.points[-1] == (-40, -100)
+    assert w2.points[-1] == (40, -100)
+    c_moved = scene.build_circuit()
+    MNASolver(c_moved).solve_dc()
+    assert math.isclose(abs(c_moved.get_component("R1").current), 0.012, rel_tol=1e-7)
 
-        # Undo move -> R1 and wires return to (-60), Redo -> back to (-100)
-        scene.undo_stack.undo()
-        assert r1_item.pos() == QPointF(0.0, -60.0)
-        assert w1.points[-1] == (-40, -60)
-        scene.undo_stack.redo()
-        assert r1_item.pos() == QPointF(0.0, -100.0)
-        scene.undo_stack.undo()
+    # Undo move -> R1 and wires return to (-60), Redo -> back to (-100)
+    scene.undo_stack.undo()
+    assert r1_item.pos() == QPointF(0.0, -60.0)
+    assert w1.points[-1] == (-40, -60)
+    scene.undo_stack.redo()
+    assert r1_item.pos() == QPointF(0.0, -100.0)
+    scene.undo_stack.undo()
 
-        # 4. Rotate and Flip R1 with Undo/Redo
-        scene.clearSelection()
-        r1_item.setSelected(True)
-        scene.rotate_selected()
-        assert r1_item.rotation_deg == 90
-        scene.undo_stack.undo()
-        assert r1_item.rotation_deg == 0
+    # 4. Rotate and Flip R1 with Undo/Redo
+    scene.clearSelection()
+    r1_item.setSelected(True)
+    scene.rotate_selected()
+    assert r1_item.rotation_deg == 90
+    scene.undo_stack.undo()
+    assert r1_item.rotation_deg == 0
 
-        scene.flip_selected()
-        assert r1_item.flipped_h is True
-        scene.undo_stack.undo()
-        assert r1_item.flipped_h is False
+    scene.flip_selected()
+    assert r1_item.flipped_h is True
+    scene.undo_stack.undo()
+    assert r1_item.flipped_h is False
 
-        # 5. Delete R1 -> also deletes attached wires w1 and w2 (Rule 2)
-        scene.clearSelection()
-        r1_item.setSelected(True)
-        scene.delete_selected()
-        assert len(scene.placed_items) == 2
-        assert len(scene.placed_wires) == 1
-        assert scene.placed_wires[0] is w3
+    # 5. Delete R1 -> also deletes attached wires w1 and w2 (Rule 2)
+    scene.clearSelection()
+    r1_item.setSelected(True)
+    scene.delete_selected()
+    assert len(scene.placed_items) == 2
+    assert len(scene.placed_wires) == 1
+    assert scene.placed_wires[0] is w3
 
-        # Undo delete -> restores R1 AND attached wires w1 and w2 with identical solved voltages
-        scene.undo_stack.undo()
-        assert len(scene.placed_items) == 3
-        assert len(scene.placed_wires) == 3
-        c_restored = scene.build_circuit()
-        sol_restored = MNASolver(c_restored).solve_dc()
-        for k, v in sol_init.node_voltages.items():
-            assert math.isclose(sol_restored.node_voltages[k], v, rel_tol=1e-12, abs_tol=1e-12)
+    # Undo delete -> restores R1 AND attached wires w1 and w2 with identical solved voltages
+    scene.undo_stack.undo()
+    assert len(scene.placed_items) == 3
+    assert len(scene.placed_wires) == 3
+    c_restored = scene.build_circuit()
+    sol_restored = MNASolver(c_restored).solve_dc()
+    for k, v in sol_init.node_voltages.items():
+        assert math.isclose(sol_restored.node_voltages[k], v, rel_tol=1e-12, abs_tol=1e-12)
 
-        # 6. Copy / Paste R1 -> adds R2, Undo removes R2
-        scene.clearSelection()
-        r1_item.setSelected(True)
-        assert scene.copy_selected() is True
-        assert scene.paste_clipboard(offset_px=(80.0, 0.0)) is True
-        assert len(scene.placed_items) == 4
-        scene.undo_stack.undo()
-        assert len(scene.placed_items) == 3
-        """
-    )
-    proc = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, f"Subprocess failed:\n{proc.stderr}\n{proc.stdout}"
+    # 6. Copy / Paste R1 -> adds R2, Undo removes R2
+    scene.clearSelection()
+    r1_item.setSelected(True)
+    assert scene.copy_selected() is True
+    assert scene.paste_clipboard(offset_px=(80.0, 0.0)) is True
+    assert len(scene.placed_items) == 4
+    scene.undo_stack.undo()
+    assert len(scene.placed_items) == 3

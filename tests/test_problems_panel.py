@@ -2,95 +2,79 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-import pytest
+import numpy as np
 
-from circuitsim.components import DCVoltageSource, Ground, LED, Resistor
+from circuitsim.components import Ammeter, DCVoltageSource, Ground, LED, Lightbulb, Resistor, Voltmeter
 from circuitsim.engine.netlist import Circuit
 from circuitsim.engine.simulation_session import (
     ProblemDiagnostic,
+    SimulationFrame,
     SimulationSession,
     SimulationState,
 )
 
 
-def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=25,
-    )
+def _image_array(img) -> np.ndarray:
+    from PySide6.QtGui import QImage
+
+    rgba = img.convertToFormat(QImage.Format.Format_ARGB32)
+    arr = np.frombuffer(rgba.constBits(), dtype=np.uint8)
+    return arr.reshape((rgba.height(), rgba.width(), 4)).copy()
 
 
-def test_problems_panel_widget_and_columns() -> None:
+def test_problems_panel_widget_and_columns(qapp) -> None:
     """Verify ProblemsPanel header, tree columns, severity icons/words, and click signal."""
-    script = """
-import sys
-from PySide6.QtWidgets import QApplication
-from circuitsim.app.problems_panel import ProblemsPanel
-from circuitsim.engine.simulation_session import ProblemDiagnostic
+    from circuitsim.app.problems_panel import ProblemsPanel
 
-app = QApplication.instance() or QApplication([])
-panel = ProblemsPanel()
-assert panel.title_label.text() == "Problems"
-assert panel.close_btn is not None
+    panel = ProblemsPanel()
+    assert panel.title_label.text() == "Problems"
+    assert panel.close_btn is not None
 
-diags = [
-    ProblemDiagnostic(
-        code="no_ground",
-        severity="error",
-        message="No ground connected: circuit requires reference; Add a Ground part",
-        component_names=("V1", "R1"),
-    ),
-    ProblemDiagnostic(
-        code="led_over_current",
-        severity="warning",
-        message="LED D1 over-current: current 35 mA exceeds max 30 mA; increase resistor",
-        component_names=("D1",),
-    ),
-]
+    diags = [
+        ProblemDiagnostic(
+            code="no_ground",
+            severity="error",
+            message="No ground connected: circuit requires reference; Add a Ground part",
+            component_names=("V1", "R1"),
+        ),
+        ProblemDiagnostic(
+            code="led_over_current",
+            severity="warning",
+            message="LED D1 over-current: current 35 mA exceeds max 30 mA; increase resistor",
+            component_names=("D1",),
+        ),
+    ]
 
-panel.update_diagnostics(diags)
-assert panel.count_label.text() == "(2)"
-assert panel.tree.topLevelItemCount() == 2
+    panel.update_diagnostics(diags)
+    assert panel.count_label.text() == "(2)"
+    assert panel.tree.topLevelItemCount() == 2
 
-item0 = panel.tree.topLevelItem(0)
-assert item0.text(0) == "Error"
-assert "No ground connected" in item0.text(1)
-assert "V1, R1" in item0.text(2)
-assert not item0.icon(0).isNull()
+    item0 = panel.tree.topLevelItem(0)
+    assert item0.text(0) == "Error"
+    assert "No ground connected" in item0.text(1)
+    assert "V1, R1" in item0.text(2)
+    assert not item0.icon(0).isNull()
 
-item1 = panel.tree.topLevelItem(1)
-assert item1.text(0) == "Warning"
-assert "LED D1 over-current" in item1.text(1)
-assert "D1" in item1.text(2)
-assert not item1.icon(0).isNull()
+    item1 = panel.tree.topLevelItem(1)
+    assert item1.text(0) == "Warning"
+    assert "LED D1 over-current" in item1.text(1)
+    assert "D1" in item1.text(2)
+    assert not item1.icon(0).isNull()
 
-# Test click activation signal
-activated_parts = []
-panel.problem_activated.connect(activated_parts.append)
-panel._on_item_clicked(item1, 0)
-assert activated_parts == ["D1"]
+    activated_parts: list[str] = []
+    panel.problem_activated.connect(activated_parts.append)
+    panel._on_item_clicked(item1, 0)
+    assert activated_parts == ["D1"]
 
-# Test close button signal
-close_emitted = False
+    close_emitted = False
 
-def on_close():
-    global close_emitted
-    close_emitted = True
+    def on_close() -> None:
+        nonlocal close_emitted
+        close_emitted = True
 
-panel.close_requested.connect(on_close)
-panel.close_btn.click()
-assert close_emitted is True
-"""
-    proc = _run_qt_script(script)
-    assert proc.returncode == 0, f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    panel.close_requested.connect(on_close)
+    panel.close_btn.click()
+    assert close_emitted is True
 
 
 def test_structured_diagnostics_what_why_how() -> None:
@@ -129,273 +113,222 @@ def test_structured_diagnostics_what_why_how() -> None:
     assert "tied to ground" in diag_float.message
 
 
-def test_offscreen_problems_panel_integration_and_canvas_invariance() -> None:
+def test_offscreen_problems_panel_integration_and_canvas_invariance(qapp) -> None:
     """Offscreen Qt test: verify F8 toggle, close button, selection centering, status bar count, and view invariance."""
-    script = """
-import sys
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPointF
+    from circuitsim.app.main_window import MainWindow
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.canvas.component_item import ComponentItem
+    win = MainWindow()
+    win.show()
 
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
-win.show()
+    scene = win.circuit_scene
+    view = win.circuit_view
 
-scene = win.circuit_scene
-view = win.circuit_view
+    led_item = scene.place_new_component("led", QPointF(200.0, 200.0))
+    scene.place_new_component("resistor", QPointF(350.0, 200.0))
 
-# Place an LED and resistor on canvas
-led_item = scene.place_new_component("led", QPointF(200.0, 200.0))
-res_item = scene.place_new_component("resistor", QPointF(350.0, 200.0))
+    h_before = view.horizontalScrollBar().value()
+    v_before = view.verticalScrollBar().value()
+    rect_before = (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height())
+    zoom_before = view._zoom_factor
 
-# Record view scrollbars and scene rect before toggling problems panel
-h_before = view.horizontalScrollBar().value()
-v_before = view.verticalScrollBar().value()
-rect_before = (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height())
-zoom_before = view._zoom_factor
+    # 1. Toggle problems panel with F8
+    assert win.problems_dock.isHidden()
+    win.action_view_problems.trigger()
+    assert win.problems_dock.isVisible()
+    assert win.action_view_problems.isChecked()
 
-# 1. Toggle problems panel with F8
-assert win.problems_dock.isHidden()
-win.action_view_problems.trigger()
-assert win.problems_dock.isVisible()
-assert win.action_view_problems.isChecked()
+    # Verify view has NOT shifted (NoAnchor)
+    assert view.horizontalScrollBar().value() == h_before, "Horizontal scrollbar shifted on panel open!"
+    assert view.verticalScrollBar().value() == v_before, "Vertical scrollbar shifted on panel open!"
+    assert (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height()) == rect_before
+    assert view._zoom_factor == zoom_before
 
-# Verify view has NOT shifted (NoAnchor)
-assert view.horizontalScrollBar().value() == h_before, "Horizontal scrollbar shifted on panel open!"
-assert view.verticalScrollBar().value() == v_before, "Vertical scrollbar shifted on panel open!"
-assert (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height()) == rect_before
-assert view._zoom_factor == zoom_before
+    # 2. Close problems panel via close button
+    win.problems_dock.panel.close_btn.click()
+    assert win.problems_dock.isHidden()
+    assert not win.action_view_problems.isChecked()
 
-# 2. Close problems panel via close button
-win.problems_dock.panel.close_btn.click()
-assert win.problems_dock.isHidden()
-assert not win.action_view_problems.isChecked()
+    # Verify view still has NOT shifted
+    assert view.horizontalScrollBar().value() == h_before, "Horizontal scrollbar shifted on panel close!"
+    assert view.verticalScrollBar().value() == v_before, "Vertical scrollbar shifted on panel close!"
 
-# Verify view still has NOT shifted
-assert view.horizontalScrollBar().value() == h_before, "Horizontal scrollbar shifted on panel close!"
-assert view.verticalScrollBar().value() == v_before, "Vertical scrollbar shifted on panel close!"
+    # 3. Test problem selection and view centering
+    win.problems_dock.show()
+    win._on_problem_part_selected(led_item.component.name)
+    assert led_item.isSelected()
 
-# 3. Test problem selection and view centering
-win.problems_dock.show()
-win._on_problem_part_selected(led_item.component.name)
-assert led_item.isSelected()
+    # 4. Status bar short count test
+    test_diags = [
+        ProblemDiagnostic(code="test1", severity="error", message="Test error", component_names=("D1",)),
+        ProblemDiagnostic(code="test2", severity="warning", message="Test warning", component_names=("R1",)),
+    ]
+    frame = SimulationFrame(
+        state=SimulationState.RUNNING,
+        sim_time=0.1,
+        dt=1e-3,
+        speed_ratio=1.0,
+        node_voltages={},
+        components={},
+        diagnostics=tuple(test_diags),
+    )
+    win._on_simulation_frame(frame)
+    assert win.status_warnings.text() == "2 problems"
 
-# 4. Status bar short count test
-from circuitsim.engine.simulation_session import ProblemDiagnostic
-test_diags = [
-    ProblemDiagnostic(code="test1", severity="error", message="Test error", component_names=("D1",)),
-    ProblemDiagnostic(code="test2", severity="warning", message="Test warning", component_names=("R1",)),
-]
-from circuitsim.engine.simulation_session import SimulationFrame, SimulationState
-frame = SimulationFrame(
-    state=SimulationState.RUNNING,
-    sim_time=0.1,
-    dt=1e-3,
-    speed_ratio=1.0,
-    node_voltages={},
-    components={},
-    diagnostics=tuple(test_diags),
-)
-win._on_simulation_frame(frame)
-assert win.status_warnings.text() == "2 problems"
-
-# Clean close
-win._is_closing = True
-win.close()
-print("PROBLEMS_PANEL_OK")
-"""
-    res = _run_qt_script(script)
-    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "PROBLEMS_PANEL_OK" in res.stdout
+    win._is_closing = True
+    win.close()
 
 
-def test_problems_panel_close_button_visual_and_accessible_in_both_themes() -> None:
+def test_problems_panel_close_button_visual_and_accessible_in_both_themes(qapp) -> None:
     """Item 2: Verify close button text/icon, min size 24x24, tooltip, accessible name,
 
     visibility in dark and light themes, zero canvas shift on click, and severity icons.
     """
-    script = """
-import os
-import sys
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-from PySide6.QtCore import QPointF
-from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QImage
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.problems_panel import make_severity_icon
+    from circuitsim.app.themes import ThemeMode
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.app.problems_panel import ProblemsPanel, make_severity_icon
-from circuitsim.app.themes import ThemeMode
-
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
-win.resize(1000, 700)
-win.show()
-
-panel = win.problems_dock.panel
-btn = panel.close_btn
-
-# 1. Properties
-assert btn.minimumWidth() >= 24, f"Expected min width >= 24, got {btn.minimumWidth()}"
-assert btn.minimumHeight() >= 24, f"Expected min height >= 24, got {btn.minimumHeight()}"
-assert btn.toolTip() == "Close (F8)", f"Expected tooltip 'Close (F8)', got '{btn.toolTip()}'"
-assert btn.accessibleName() == "Close (F8)", f"Expected accessibleName 'Close (F8)', got '{btn.accessibleName()}'"
-assert (bool(btn.text().strip()) or not btn.icon().isNull()), "Button must have non-empty text or non-null icon"
-assert "✕" in btn.text(), f"Expected '✕' in button text, got '{btn.text()}'"
-
-# 2. Render in both Dark and Light themes and assert button pixels differ from background
-for theme in [ThemeMode.DARK, ThemeMode.LIGHT]:
-    win.apply_theme(theme)
-    win.problems_dock.show()
-    app.processEvents()
-
-    # Render close button area
-    btn_size = btn.size()
-    img = QImage(btn_size, QImage.Format.Format_ARGB32)
-    # Background color of the header
-    bg_col = QColor("#161B22" if theme == ThemeMode.DARK else "#FFFFFF")
-    img.fill(bg_col)
-    btn.render(img)
-
-    differing_pixels = sum(
-        1 for y in range(img.height()) for x in range(img.width()) if img.pixelColor(x, y) != bg_col
-    )
-    assert differing_pixels > 0, f"Close button pixels did not differ from background in {theme.value} theme!"
-
-# 3. Canvas shift invariance on button click
-scene = win.circuit_scene
-view = win.circuit_view
-scene.place_new_component("resistor", QPointF(200.0, 200.0))
-
-h_val = view.horizontalScrollBar().value()
-v_val = view.verticalScrollBar().value()
-s_rect = (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height())
-
-# Click close button
-assert win.problems_dock.isVisible()
-btn.click()
-app.processEvents()
-assert win.problems_dock.isHidden(), "ProblemsDock should be hidden after clicking close button"
-assert view.horizontalScrollBar().value() == h_val, "Canvas horizontal scroll shifted on close!"
-assert view.verticalScrollBar().value() == v_val, "Canvas vertical scroll shifted on close!"
-assert (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height()) == s_rect
-
-# 4. Severity icons verification (error, warning, info)
-for sev in ["error", "warning", "info"]:
-    icon = make_severity_icon(sev)
-    assert not icon.isNull(), f"Severity icon for '{sev}' is null"
-    pm = icon.pixmap(16, 16)
-    assert not pm.isNull()
-    img_sev = pm.toImage()
-    # Check that center contains drawn pixels (not empty box)
-    colored_pixels = sum(
-        1 for y in range(16) for x in range(16) if img_sev.pixelColor(x, y).alpha() > 0
-    )
-    assert colored_pixels >= 20, f"Severity icon for '{sev}' has too few pixels ({colored_pixels})"
-
-win._is_closing = True
-win.close()
-print("CLOSE_BTN_AND_ICONS_OK")
-"""
-    res = _run_qt_script(script)
-    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "CLOSE_BTN_AND_ICONS_OK" in res.stdout
-
-
-def test_no_blank_buttons_or_icons_in_both_themes() -> None:
-    """Scan every dialog, panel, toolbar button, and menu/severity icon in dark and light themes."""
-    script = """
-import sys
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QAbstractButton, QMenu
-from circuitsim.app.main_window import MainWindow
-from circuitsim.app.problems_panel import ProblemsPanel, make_severity_icon
-from circuitsim.app.themes import ThemeMode
-from circuitsim.canvas.export import ExportOptionsDialog
-from circuitsim.components import Ammeter, LED, Lightbulb, Resistor, Voltmeter
-from circuitsim.dialogs.preferences_dialog import PreferencesDialog
-from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
-from circuitsim.engine.simulation_session import ProblemDiagnostic
-
-app = QApplication.instance() or QApplication(sys.argv)
-
-def has_non_uniform_pixels(img: QImage) -> bool:
-    if img.isNull() or img.width() == 0 or img.height() == 0:
-        return False
-    c0 = img.pixel(0, 0)
-    for y in range(img.height()):
-        for x in range(img.width()):
-            if img.pixel(x, y) != c0:
-                return True
-    return False
-
-def assert_button_not_blank(btn: QAbstractButton, ctx: str) -> None:
-    # Skip Qt-internal hidden/squashed titlebar & overflow buttons
-    if btn.objectName() in ("qt_toolbar_ext_button", "qt_dockwidget_closebutton", "qt_dockwidget_floatbutton"):
-        return
-    txt = btn.text().strip()
-    icon = btn.icon()
-    btn.ensurePolished()
-    if btn.width() <= 0 or btn.height() <= 0:
-        btn.resize(btn.sizeHint().expandedTo(QSize(24, 24)))
-    img = btn.grab().toImage()
-    assert has_non_uniform_pixels(img), f"Blank button in {ctx}: {btn.objectName() or type(btn).__name__}"
-    assert txt or not icon.isNull() or has_non_uniform_pixels(img), f"Button has no text, icon, or custom paint: {ctx}"
-
-for theme_name in ("dark", "light"):
     win = MainWindow()
-    win.apply_theme(ThemeMode(theme_name))
+    win.resize(1000, 700)
     win.show()
-    app.processEvents()
 
-    panel = win.problems_dock.findChild(ProblemsPanel)
-    assert panel is not None
-    panel.update_diagnostics([
-        ProblemDiagnostic(code="no_ground", severity="error", message="No ground", component_names=("V1",)),
-        ProblemDiagnostic(code="ammeter_in_parallel", severity="warning", message="Ammeter parallel", component_names=("A1",)),
-    ])
-    win.problems_dock.show()
-    app.processEvents()
+    panel = win.problems_dock.panel
+    btn = panel.close_btn
 
-    for btn in win.findChildren(QAbstractButton):
-        if btn.isVisible():
-            assert_button_not_blank(btn, f"MainWindow({theme_name})")
+    # 1. Properties
+    assert btn.minimumWidth() >= 24, f"Expected min width >= 24, got {btn.minimumWidth()}"
+    assert btn.minimumHeight() >= 24, f"Expected min height >= 24, got {btn.minimumHeight()}"
+    assert btn.toolTip() == "Close (F8)", f"Expected tooltip 'Close (F8)', got '{btn.toolTip()}'"
+    assert btn.accessibleName() == "Close (F8)", f"Expected accessibleName 'Close (F8)', got '{btn.accessibleName()}'"
+    assert (bool(btn.text().strip()) or not btn.icon().isNull()), "Button must have non-empty text or non-null icon"
+    assert "✕" in btn.text(), f"Expected '✕' in button text, got '{btn.text()}'"
 
-    for sev in ("error", "warning", "info"):
-        ic = make_severity_icon(sev)
-        assert not ic.isNull()
-        assert has_non_uniform_pixels(ic.pixmap(16, 16).toImage()), f"Blank severity icon {sev}"
+    # 2. Render in both Dark and Light themes and assert button pixels differ from background
+    for theme in [ThemeMode.DARK, ThemeMode.LIGHT]:
+        win.apply_theme(theme)
+        win.problems_dock.show()
+        qapp.processEvents()
 
-    for menu in win.menuBar().findChildren(QMenu):
-        for act in menu.actions():
-            if not act.icon().isNull():
-                assert has_non_uniform_pixels(act.icon().pixmap(16, 16).toImage()), f"Blank menu icon {act.text()}"
+        btn_size = btn.size()
+        img = QImage(btn_size, QImage.Format.Format_ARGB32)
+        bg_col = QColor("#161B22" if theme == ThemeMode.DARK else "#FFFFFF")
+        img.fill(bg_col)
+        btn.render(img)
 
-    for comp in (LED("D1", "1", "0"), Voltmeter("VM1", "1", "0"), Ammeter("A1", "1", "0"), Resistor("R1", "1", "0"), Lightbulb("L1", "1", "0")):
-        dlg = QuickValueDialog(comp)
-        dlg.show()
-        app.processEvents()
-        for btn in dlg.findChildren(QAbstractButton):
-            if btn.isVisible():
-                assert_button_not_blank(btn, f"QuickValueDialog({type(comp).__name__}, {theme_name})")
-        dlg.close()
+        arr = _image_array(img)
+        bg_bgra = np.array([bg_col.blue(), bg_col.green(), bg_col.red(), bg_col.alpha()], dtype=np.uint8)
+        differing_pixels = int(np.any(arr != bg_bgra, axis=2).sum())
+        assert differing_pixels > 0, f"Close button pixels did not differ from background in {theme.value} theme!"
 
-    for dlg in (PreferencesDialog(win.settings), ExportOptionsDialog(ThemeMode(theme_name))):
-        dlg.show()
-        app.processEvents()
-        for btn in dlg.findChildren(QAbstractButton):
-            if btn.isVisible():
-                assert_button_not_blank(btn, f"{type(dlg).__name__}({theme_name})")
-        dlg.close()
+    # 3. Canvas shift invariance on button click
+    scene = win.circuit_scene
+    view = win.circuit_view
+    scene.place_new_component("resistor", QPointF(200.0, 200.0))
 
-    win.circuit_scene.undo_stack.setClean()
+    h_val = view.horizontalScrollBar().value()
+    v_val = view.verticalScrollBar().value()
+    s_rect = (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height())
+
+    assert win.problems_dock.isVisible()
+    btn.click()
+    qapp.processEvents()
+    assert win.problems_dock.isHidden(), "ProblemsDock should be hidden after clicking close button"
+    assert view.horizontalScrollBar().value() == h_val, "Canvas horizontal scroll shifted on close!"
+    assert view.verticalScrollBar().value() == v_val, "Canvas vertical scroll shifted on close!"
+    assert (scene.sceneRect().x(), scene.sceneRect().y(), scene.sceneRect().width(), scene.sceneRect().height()) == s_rect
+
+    # 4. Severity icons verification (error, warning, info)
+    for sev in ["error", "warning", "info"]:
+        icon = make_severity_icon(sev)
+        assert not icon.isNull(), f"Severity icon for '{sev}' is null"
+        pm = icon.pixmap(16, 16)
+        assert not pm.isNull()
+        arr_sev = _image_array(pm.toImage())
+        colored_pixels = int((arr_sev[:, :, 3] > 0).sum())
+        assert colored_pixels >= 20, f"Severity icon for '{sev}' has too few pixels ({colored_pixels})"
+
+    win._is_closing = True
     win.close()
-    app.processEvents()
 
-print("SCAN_ALL_WIDGETS_OK")
-"""
-    res = _run_qt_script(script)
-    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "SCAN_ALL_WIDGETS_OK" in res.stdout
+
+def test_no_blank_buttons_or_icons_in_both_themes(qapp) -> None:
+    """Scan every dialog, panel, toolbar button, and menu/severity icon in dark and light themes."""
+    from PySide6.QtCore import QSize
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QAbstractButton, QMenu
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.problems_panel import ProblemsPanel, make_severity_icon
+    from circuitsim.app.themes import ThemeMode
+    from circuitsim.canvas.export import ExportOptionsDialog
+    from circuitsim.dialogs.preferences_dialog import PreferencesDialog
+    from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+
+    def has_non_uniform_pixels(img: QImage) -> bool:
+        if img.isNull() or img.width() == 0 or img.height() == 0:
+            return False
+        arr = _image_array(img)
+        return bool(np.any(arr != arr[0, 0]))
+
+    def assert_button_not_blank(btn: QAbstractButton, ctx: str) -> None:
+        if btn.objectName() in ("qt_toolbar_ext_button", "qt_dockwidget_closebutton", "qt_dockwidget_floatbutton"):
+            return
+        txt = btn.text().strip()
+        icon = btn.icon()
+        btn.ensurePolished()
+        if btn.width() <= 0 or btn.height() <= 0:
+            btn.resize(btn.sizeHint().expandedTo(QSize(24, 24)))
+        img = btn.grab().toImage()
+        assert has_non_uniform_pixels(img), f"Blank button in {ctx}: {btn.objectName() or type(btn).__name__}"
+        assert txt or not icon.isNull() or has_non_uniform_pixels(img), f"Button has no text, icon, or custom paint: {ctx}"
+
+    for theme_name in ("dark", "light"):
+        win = MainWindow()
+        win.apply_theme(ThemeMode(theme_name))
+        win.show()
+        qapp.processEvents()
+
+        panel = win.problems_dock.findChild(ProblemsPanel)
+        assert panel is not None
+        panel.update_diagnostics([
+            ProblemDiagnostic(code="no_ground", severity="error", message="No ground", component_names=("V1",)),
+            ProblemDiagnostic(code="ammeter_in_parallel", severity="warning", message="Ammeter parallel", component_names=("A1",)),
+        ])
+        win.problems_dock.show()
+        qapp.processEvents()
+
+        for btn in win.findChildren(QAbstractButton):
+            if btn.isVisible():
+                assert_button_not_blank(btn, f"MainWindow({theme_name})")
+
+        for sev in ("error", "warning", "info"):
+            ic = make_severity_icon(sev)
+            assert not ic.isNull()
+            assert has_non_uniform_pixels(ic.pixmap(16, 16).toImage()), f"Blank severity icon {sev}"
+
+        for menu in win.menuBar().findChildren(QMenu):
+            for act in menu.actions():
+                if not act.icon().isNull():
+                    assert has_non_uniform_pixels(act.icon().pixmap(16, 16).toImage()), f"Blank menu icon {act.text()}"
+
+        for comp in (LED("D1", "1", "0"), Voltmeter("VM1", "1", "0"), Ammeter("A1", "1", "0"), Resistor("R1", "1", "0"), Lightbulb("L1", "1", "0")):
+            dlg = QuickValueDialog(comp)
+            dlg.show()
+            qapp.processEvents()
+            for btn in dlg.findChildren(QAbstractButton):
+                if btn.isVisible():
+                    assert_button_not_blank(btn, f"QuickValueDialog({type(comp).__name__}, {theme_name})")
+            dlg.close()
+
+        for dlg in (PreferencesDialog(win.settings), ExportOptionsDialog(ThemeMode(theme_name))):
+            dlg.show()
+            qapp.processEvents()
+            for btn in dlg.findChildren(QAbstractButton):
+                if btn.isVisible():
+                    assert_button_not_blank(btn, f"{type(dlg).__name__}({theme_name})")
+            dlg.close()
+
+        win.circuit_scene.undo_stack.setClean()
+        win.close()
+        qapp.processEvents()

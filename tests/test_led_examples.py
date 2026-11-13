@@ -114,60 +114,29 @@ def test_led_colours_analytical() -> None:
     assert math.isclose(d_blue.voltage, 3.2, abs_tol=1e-2)
 
 
-def _run_qt_script(script: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
-    return subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        timeout=25,
-    )
-
-
-def test_offscreen_led_examples_menu_and_loading() -> None:
+def test_offscreen_led_examples_menu_and_loading(qapp) -> None:
     """Offscreen Qt test: verify File > Examples actions load and run cleanly."""
-    script = """
-import sys
-from PySide6.QtWidgets import QApplication
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.engine.solver import MNASolver
 
-from circuitsim.app.main_window import MainWindow
+    win = MainWindow()
+    win.show()
 
-app = QApplication.instance() or QApplication([])
-win = MainWindow()
-win.show()
+    actions = win.examples_menu.actions()
+    action_titles = [a.text() for a in actions]
 
-# Find the LED example actions in File > Examples
-actions = win.examples_menu.actions()
-action_titles = [a.text() for a in actions]
+    assert "LED with a resistor" in action_titles, f"Missing LED with a resistor in {action_titles}"
+    assert "LED colours" in action_titles, f"Missing LED colours in {action_titles}"
 
-assert "LED with a resistor" in action_titles, f"Missing LED with a resistor in {action_titles}"
-assert "LED colours" in action_titles, f"Missing LED colours in {action_titles}"
+    act_res = next(a for a in actions if a.text() == "LED with a resistor")
+    act_res.trigger()
 
-# Trigger "LED with a resistor"
-act_res = next(a for a in actions if a.text() == "LED with a resistor")
-act_res.trigger()
+    comp_names = [item.component.name for item in win.circuit_scene.placed_items]
+    assert "D1" in comp_names
+    assert "R1" in comp_names
+    assert "V1" in comp_names
 
-# Verify components loaded onto scene
-comp_names = [item.component.name for item in win.circuit_scene.placed_items]
-assert "D1" in comp_names
-assert "R1" in comp_names
-assert "V1" in comp_names
-
-# Verify circuit solves to 20 mA
-import math
-from circuitsim.engine.solver import MNASolver
-
-circuit = win.circuit_scene.build_circuit()
-solver = MNASolver(circuit)
-res = solver.solve_dc()
-d1 = circuit.get_component("D1")
-assert math.isclose(d1.current, 0.020, rel_tol=1e-3)
-win._is_closing = True
-win.close()
-print("LED_EXAMPLES_MENU_OK")
-"""
-    res = _run_qt_script(script)
-    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    assert "LED_EXAMPLES_MENU_OK" in res.stdout
+    circuit = win.circuit_scene.build_circuit()
+    MNASolver(circuit).solve_dc()
+    d1 = circuit.get_component("D1")
+    assert math.isclose(d1.current, 0.020, rel_tol=1e-3)

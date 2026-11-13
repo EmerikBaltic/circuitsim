@@ -37,10 +37,12 @@ from circuitsim.engine import (
 )
 
 
+from conftest import assert_module_has_no_qt_imports
+
+
 def test_simulation_session_has_zero_qt_imports() -> None:
     """Verify `circuitsim.engine.simulation_session` imports zero PySide6 modules."""
-    qt_mods = [m for m in sys.modules if m.startswith("PySide6")]
-    assert qt_mods == []
+    assert_module_has_no_qt_imports("circuitsim.engine.simulation_session")
 
 
 def test_transport_controls_state_mapping_and_transitions() -> None:
@@ -487,9 +489,8 @@ def test_problem_diagnostics_for_errors_and_warnings() -> None:
     assert any(d.code == "inductive_kickback" for d in f_kick.diagnostics)
 
 
-def test_qt_step2c_ui_responsiveness_upright_labels_speed_dropdown_and_quick_edit() -> None:
-    """Run Qt verification in a dedicated subprocess so the main pytest runner never imports PySide6.
-    Verifies:
+def test_qt_step2c_ui_responsiveness_upright_labels_speed_dropdown_and_quick_edit(qapp) -> None:
+    """Verifies:
     1. Addition #3: Labels and values stay upright (0 deg effective world rotation, no mirror flip)
        when rotated (0, 90, 180, 270) or flipped horizontally.
     2. Addition #5: Toolbar Speed dropdown (`speed_combo`) is visible without overflowing at 1024x768.
@@ -497,438 +498,385 @@ def test_qt_step2c_ui_responsiveness_upright_labels_speed_dropdown_and_quick_edi
     4. Addition #7: Background QThread worker (`SimulationWorkerController`) runs live simulation chunks
        while the main GUI event loop processes timer heartbeats without freezing or stalling.
     """
-    script = """
-import sys
-import time
-from PySide6.QtCore import QEventLoop, QPointF, QTimer
-from PySide6.QtWidgets import QApplication
+    import time
+    from PySide6.QtCore import QEventLoop, QPointF, QTimer
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.canvas.component_item import ComponentItem
-from circuitsim.canvas.symbol_renderer import SymbolLibrary
-from circuitsim.components.resistor import Resistor
-from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.canvas.component_item import ComponentItem
+    from circuitsim.canvas.symbol_renderer import SymbolLibrary
+    from circuitsim.components.resistor import Resistor
+    from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+    from circuitsim.engine.simulation_session import SimulationState, compute_transport_controls_state
 
-app = QApplication(sys.argv)
-lib = SymbolLibrary()
+    lib = SymbolLibrary()
 
-# 1. Verify upright labels and values under all rotations & flips (Addition #3 & Item 5)
-comp_item = ComponentItem(Resistor("R1", "a", "b", resistance=1000.0), lib)
-for rot in (0, 90, 180, 270):
-    for flip in (False, True):
-        comp_item.set_rotation_deg(rot)
-        comp_item.set_flipped_h(flip)
-        assert comp_item.transform().isIdentity(), f"Expected identity QGraphicsItem transform for rot={rot}, flip={flip}"
-        assert comp_item.effective_text_angle_deg() == 0.0, f"Text angle not upright for rot={rot}, flip={flip}"
-        sel_rect = comp_item.selection_outline_rect_local()
-        lbl_rect, val_rect, _ = comp_item._upright_label_and_value_rects()
-        assert not sel_rect.intersects(lbl_rect), f"Selection box {sel_rect} overlaps label {lbl_rect} at rot={rot}"
-        assert not sel_rect.intersects(val_rect), f"Selection box {sel_rect} overlaps value {val_rect} at rot={rot}"
+    # 1. Verify upright labels and values under all rotations & flips (Addition #3 & Item 5)
+    comp_item = ComponentItem(Resistor("R1", "a", "b", resistance=1000.0), lib)
+    for rot in (0, 90, 180, 270):
+        for flip in (False, True):
+            comp_item.set_rotation_deg(rot)
+            comp_item.set_flipped_h(flip)
+            assert comp_item.transform().isIdentity(), f"Expected identity QGraphicsItem transform for rot={rot}, flip={flip}"
+            assert comp_item.effective_text_angle_deg() == 0.0, f"Text angle not upright for rot={rot}, flip={flip}"
+            sel_rect = comp_item.selection_outline_rect_local()
+            lbl_rect, val_rect, _ = comp_item._upright_label_and_value_rects()
+            assert not sel_rect.intersects(lbl_rect), f"Selection box {sel_rect} overlaps label {lbl_rect} at rot={rot}"
+            assert not sel_rect.intersects(val_rect), f"Selection box {sel_rect} overlaps value {val_rect} at rot={rot}"
 
-# 2. Verify MainWindow toolbar Speed dropdown is visible at 1024x768 (Addition #5)
-win = MainWindow()
-win.resize(1024, 768)
-win.show()
-app.processEvents()
-assert win.speed_combo.isVisible(), "Speed dropdown must be visible on toolbar without overflowing"
+    # 2. Verify MainWindow toolbar Speed dropdown is visible at 1024x768 (Addition #5)
+    # Run in a subprocess without QT_QPA_PLATFORM=offscreen because Qt's offscreen
+    # fallback font makes the toolbar sizeHint ~1748 px wide vs ~1042 px on native QPA.
+    import os
+    import subprocess
+    import sys
 
-# 2b. Verify real toolbar actions and status bar state indicator match pure-Python mapping (Item 3)
-from circuitsim.engine.simulation_session import SimulationState, compute_transport_controls_state
-for state in (SimulationState.STOPPED, SimulationState.RUNNING, SimulationState.PAUSED, SimulationState.ERROR):
-    expected_ui = compute_transport_controls_state(state, error_reason="No ground connected")
-    win._sim_state = state
-    win._apply_transport_controls_ui(state, error_reason="No ground connected")
-    assert win.act_run.isEnabled() == expected_ui.run_enabled
-    assert win.act_pause.isEnabled() == expected_ui.pause_enabled
-    assert win.act_stop.isEnabled() == expected_ui.stop_enabled
-    assert win.act_run.iconText() == expected_ui.run_icon_text
-    assert win.status_state_indicator.text() == expected_ui.status_indicator_text
-    # Also verify theme switching keeps the state indicator and button styles intact
-    win.toggle_theme()
-    assert win.status_state_indicator.text() == expected_ui.status_indicator_text
-    win.toggle_theme()
-win._sim_state = SimulationState.STOPPED
-win._apply_transport_controls_ui(SimulationState.STOPPED)
-
-# 3. Verify QuickValueDialog validation, live preview, and readable error message (Addition #1 & Item 2)
-res = Resistor("R1", "a", "b", resistance=1000.0)
-dlg = QuickValueDialog(res)
-assert dlg.live_edit_note_label.text() == "Changes apply immediately while the simulation is running."
-dlg.inputs["resistance"].setText("invalid_xyz")
-assert dlg._apply_current_inputs() is False
-assert dlg.error_label.isHidden() is False
-assert "Couldn't read" in dlg.error_label.text()
-
-dlg.inputs["resistance"].setText("5,65 G")
-assert dlg.preview_labels["resistance"].text() == "= 5.65 GΩ"
-assert dlg._apply_current_inputs() is True
-assert dlg.applied_values["resistance"] == 5.65e9
-
-dlg.inputs["resistance"].setText("4.7k")
-assert dlg.preview_labels["resistance"].text() == "= 4.7 kΩ"
-assert dlg._apply_current_inputs() is True
-assert dlg.applied_values["resistance"] == 4700.0
-assert res.resistance == 4700.0
-
-# 4. Build a live circuit on the scene and verify non-freezing QThread simulation (Addition #7)
-scene = win.circuit_scene
-v1 = scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)   # pos at (0, -40), neg at (0, 40)
-r1 = scene.place_new_component("resistor", QPointF(120, 0), rotation_deg=90)   # a at (120, -40), b at (120, 40)
-vm1 = scene.place_new_component("voltmeter", QPointF(220, 0), rotation_deg=90) # pos at (220, -40), neg at (220, 40)
-gnd = scene.place_new_component("ground", QPointF(0, 60))                      # gnd at (0, 40)
-
-scene.add_wire([(0, -40), (120, -40)])
-scene.add_wire([(120, -40), (220, -40)])
-scene.add_wire([(0, 40), (120, 40)])
-scene.add_wire([(120, 40), (220, 40)])
-
-# Before running, voltmeter item on canvas shows '-- V'
-assert vm1.component.format_reading() == "-- V"
-
-# Measure main-thread responsiveness while simulation runs in background QThread for 240 ms
-ui_heartbeats = 0
-max_gap_ms = 0.0
-last_tick = time.perf_counter()
-
-def on_heartbeat():
-    global ui_heartbeats, max_gap_ms, last_tick
-    now = time.perf_counter()
-    gap_ms = (now - last_tick) * 1000.0
-    if ui_heartbeats > 0 and gap_ms > max_gap_ms:
-        max_gap_ms = gap_ms
-    last_tick = now
-    ui_heartbeats += 1
-
-heartbeat_timer = QTimer()
-heartbeat_timer.setInterval(10)
-heartbeat_timer.timeout.connect(on_heartbeat)
-heartbeat_timer.start()
-
-win.start_simulation()
-
-loop = QEventLoop()
-QTimer.singleShot(240, loop.quit)
-loop.exec()
-heartbeat_timer.stop()
-
-# Verify main thread processed regular 10 ms heartbeats without stalling
-assert ui_heartbeats >= 10, f"Expected >= 10 UI heartbeats during 240 ms run, got {ui_heartbeats}"
-assert max_gap_ms < 120.0, f"Main UI thread stalled for {max_gap_ms:.1f} ms"
-
-# Verify live voltmeter on canvas updated to '12 V'
-assert vm1.live_display_value == "12 V", f"Expected live voltmeter readout '12 V', got {vm1.live_display_value!r}"
-
-# Stop simulation and verify meter resets to '-- V'
-win.stop_simulation()
-stop_loop = QEventLoop()
-QTimer.singleShot(60, stop_loop.quit)
-stop_loop.exec()
-assert vm1.component.format_reading() == "-- V", f"Expected '-- V' after Stop, got {vm1.component.format_reading()!r}"
-
-win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
-win.close()
-"""
-    res = subprocess.run(
-        [sys.executable, "-c", script],
+    env = dict(os.environ)
+    env.pop("QT_QPA_PLATFORM", None)
+    tb_res = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys\n"
+                "from PySide6.QtWidgets import QApplication\n"
+                "from circuitsim.app.main_window import MainWindow\n"
+                "app = QApplication(sys.argv)\n"
+                "win = MainWindow()\n"
+                "win.resize(1024, 768)\n"
+                "win.show()\n"
+                "app.processEvents()\n"
+                "assert win.speed_combo.isVisible(), 'Speed dropdown must be visible on toolbar without overflowing'\n"
+                "win._is_closing = True\n"
+                "win.close()\n"
+            ),
+        ],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
+        timeout=20,
     )
-    print(res.stdout.strip())
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert tb_res.returncode == 0, f"Toolbar visibility check failed:\n{tb_res.stdout}\n{tb_res.stderr}"
+
+    win = MainWindow()
+    win.resize(1024, 768)
+    win.show()
+    qapp.processEvents()
+
+    # 2b. Verify real toolbar actions and status bar state indicator match pure-Python mapping (Item 3)
+    for state in (SimulationState.STOPPED, SimulationState.RUNNING, SimulationState.PAUSED, SimulationState.ERROR):
+        expected_ui = compute_transport_controls_state(state, error_reason="No ground connected")
+        win._sim_state = state
+        win._apply_transport_controls_ui(state, error_reason="No ground connected")
+        assert win.act_run.isEnabled() == expected_ui.run_enabled
+        assert win.act_pause.isEnabled() == expected_ui.pause_enabled
+        assert win.act_stop.isEnabled() == expected_ui.stop_enabled
+        assert win.act_run.iconText() == expected_ui.run_icon_text
+        assert win.status_state_indicator.text() == expected_ui.status_indicator_text
+        win.toggle_theme()
+        assert win.status_state_indicator.text() == expected_ui.status_indicator_text
+        win.toggle_theme()
+    win._sim_state = SimulationState.STOPPED
+    win._apply_transport_controls_ui(SimulationState.STOPPED)
+
+    # 3. Verify QuickValueDialog validation, live preview, and readable error message (Addition #1 & Item 2)
+    res = Resistor("R1", "a", "b", resistance=1000.0)
+    dlg = QuickValueDialog(res)
+    assert dlg.live_edit_note_label.text() == "Changes apply immediately while the simulation is running."
+    dlg.inputs["resistance"].setText("invalid_xyz")
+    assert dlg._apply_current_inputs() is False
+    assert dlg.error_label.isHidden() is False
+    assert "Couldn't read" in dlg.error_label.text()
+
+    dlg.inputs["resistance"].setText("5,65 G")
+    assert dlg.preview_labels["resistance"].text() == "= 5.65 GΩ"
+    assert dlg._apply_current_inputs() is True
+    assert dlg.applied_values["resistance"] == 5.65e9
+
+    dlg.inputs["resistance"].setText("4.7k")
+    assert dlg.preview_labels["resistance"].text() == "= 4.7 kΩ"
+    assert dlg._apply_current_inputs() is True
+    assert dlg.applied_values["resistance"] == 4700.0
+    assert res.resistance == 4700.0
+
+    # 4. Build a live circuit on the scene and verify non-freezing QThread simulation (Addition #7)
+    scene = win.circuit_scene
+    scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+    scene.place_new_component("resistor", QPointF(120, 0), rotation_deg=90)
+    vm1 = scene.place_new_component("voltmeter", QPointF(220, 0), rotation_deg=90)
+    scene.place_new_component("ground", QPointF(0, 60))
+
+    scene.add_wire([(0, -40), (120, -40)])
+    scene.add_wire([(120, -40), (220, -40)])
+    scene.add_wire([(0, 40), (120, 40)])
+    scene.add_wire([(120, 40), (220, 40)])
+
+    assert vm1.component.format_reading() == "-- V"
+
+    ui_heartbeats = 0
+    max_gap_ms = 0.0
+    last_tick = time.perf_counter()
+
+    def on_heartbeat() -> None:
+        nonlocal ui_heartbeats, max_gap_ms, last_tick
+        now = time.perf_counter()
+        gap_ms = (now - last_tick) * 1000.0
+        if ui_heartbeats > 0 and gap_ms > max_gap_ms:
+            max_gap_ms = gap_ms
+        last_tick = now
+        ui_heartbeats += 1
+
+    qapp.processEvents()
+    heartbeat_timer = QTimer()
+    heartbeat_timer.setInterval(10)
+    heartbeat_timer.timeout.connect(on_heartbeat)
+    heartbeat_timer.start()
+
+    win.start_simulation()
+
+    loop = QEventLoop()
+    QTimer.singleShot(240, loop.quit)
+    loop.exec()
+    heartbeat_timer.stop()
+
+    assert ui_heartbeats >= 10, f"Expected >= 10 UI heartbeats during 240 ms run, got {ui_heartbeats}"
+    assert max_gap_ms < 120.0, f"Main UI thread stalled for {max_gap_ms:.1f} ms"
+    assert vm1.live_display_value == "12 V", f"Expected live voltmeter readout '12 V', got {vm1.live_display_value!r}"
+
+    win.stop_simulation()
+    stop_loop = QEventLoop()
+    QTimer.singleShot(60, stop_loop.quit)
+    stop_loop.exec()
+    assert vm1.component.format_reading() == "-- V", f"Expected '-- V' after Stop, got {vm1.component.format_reading()!r}"
+
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
 
 
-def test_6b_value_edit_undo_and_redo_while_stopped_and_running() -> None:
+def test_6b_value_edit_undo_and_redo_while_stopped_and_running(qapp) -> None:
     """Item 6b: Editing a resistor value and pressing Ctrl+Z restores the old value in
     the component model, the canvas label, and the live simulation result; Ctrl+Y reapplies
     it. Tested both while stopped and while running.
     """
-    script = """
-import sys
-from PySide6.QtCore import QEventLoop, QPointF, QTimer
-from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QEventLoop, QPointF, QTimer
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.canvas.component_item import format_component_value_summary
 
-from circuitsim.app.main_window import MainWindow
-from circuitsim.canvas.component_item import format_component_value_summary
+    win = MainWindow()
+    scene = win.circuit_scene
 
-app = QApplication(sys.argv)
-win = MainWindow()
-scene = win.circuit_scene
+    scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+    a1 = scene.place_new_component("ammeter", QPointF(80, -40))
+    r1 = scene.place_new_component("resistor", QPointF(160, 0), rotation_deg=90)
+    scene.place_new_component("ground", QPointF(0, 60))
 
-v1 = scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)   # pos (0,-40), neg (0,40)
-a1 = scene.place_new_component("ammeter", QPointF(80, -40))                    # pos (40,-40), neg (120,-40)
-r1 = scene.place_new_component("resistor", QPointF(160, 0), rotation_deg=90)   # a (160,-40), b (160,40)
-gnd = scene.place_new_component("ground", QPointF(0, 60))                      # gnd (0,40)
+    scene.add_wire([(0, -40), (40, -40)])
+    scene.add_wire([(120, -40), (160, -40)])
+    scene.add_wire([(0, 40), (160, 40)])
 
-scene.add_wire([(0, -40), (40, -40)])
-scene.add_wire([(120, -40), (160, -40)])
-scene.add_wire([(0, 40), (160, 40)])
+    def wait_ms(ms: int) -> None:
+        loop = QEventLoop()
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
 
-def wait_ms(ms: int) -> None:
+    # 1. Test value edit + Undo (Ctrl+Z) + Redo (Ctrl+Y) while STOPPED
+    assert r1.component.resistance == 1000.0
+    assert format_component_value_summary(r1.component) == "1 kΩ"
+
+    assert scene.edit_component_parameters(r1, {"resistance": "2k"}) is True
+    assert r1.component.resistance == 2000.0
+    assert format_component_value_summary(r1.component) == "2 kΩ"
+
+    scene.undo_stack.undo()
+    assert r1.component.resistance == 1000.0
+    assert format_component_value_summary(r1.component) == "1 kΩ"
+
+    scene.undo_stack.redo()
+    assert r1.component.resistance == 2000.0
+    assert format_component_value_summary(r1.component) == "2 kΩ"
+
+    scene.undo_stack.undo()
+    assert r1.component.resistance == 1000.0
+
+    # 2. Test value edit + Undo (Ctrl+Z) + Redo (Ctrl+Y) while RUNNING
+    win.start_simulation()
+    wait_ms(80)
+    assert a1.live_display_value == "12 mA", f"Expected 12 mA initially, got {a1.live_display_value!r}"
+    assert r1.live_display_value == "1 kΩ"
+
+    assert scene.edit_component_parameters(r1, {"resistance": "500"}) is True
+    wait_ms(80)
+    assert r1.component.resistance == 500.0
+    assert r1.live_display_value == "500 Ω"
+    assert a1.live_display_value == "24 mA", f"Expected 24 mA after live edit, got {a1.live_display_value!r}"
+
+    scene.undo_stack.undo()
+    wait_ms(80)
+    assert r1.component.resistance == 1000.0
+    assert r1.live_display_value == "1 kΩ"
+    assert a1.live_display_value == "12 mA", f"Expected 12 mA after Undo while running, got {a1.live_display_value!r}"
+
+    scene.undo_stack.redo()
+    wait_ms(80)
+    assert r1.component.resistance == 500.0
+    assert r1.live_display_value == "500 Ω"
+    assert a1.live_display_value == "24 mA", f"Expected 24 mA after Redo while running, got {a1.live_display_value!r}"
+
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
+
+
+def test_6c_close_main_window_while_running_stops_worker_thread_cleanly(qapp) -> None:
+    """Item 6c: Closing MainWindow while a simulation is running stops the QThread cleanly."""
+    from PySide6.QtCore import QEventLoop, QPointF, QTimer
+    from circuitsim.app.main_window import MainWindow
+
+    win = MainWindow()
+    win.show()
+    scene = win.circuit_scene
+
+    scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+    scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
+    scene.place_new_component("ground", QPointF(0, 60))
+    scene.add_wire([(0, -40), (100, -40)])
+    scene.add_wire([(0, 40), (100, 40)])
+
+    win.start_simulation()
     loop = QEventLoop()
-    QTimer.singleShot(ms, loop.quit)
+    QTimer.singleShot(80, loop.quit)
     loop.exec()
 
-# 1. Test value edit + Undo (Ctrl+Z) + Redo (Ctrl+Y) while STOPPED
-assert r1.component.resistance == 1000.0
-assert format_component_value_summary(r1.component) == "1 kΩ"
-
-assert scene.edit_component_parameters(r1, {"resistance": "2k"}) is True
-assert r1.component.resistance == 2000.0
-assert format_component_value_summary(r1.component) == "2 kΩ"
-
-scene.undo_stack.undo()
-assert r1.component.resistance == 1000.0
-assert format_component_value_summary(r1.component) == "1 kΩ"
-
-scene.undo_stack.redo()
-assert r1.component.resistance == 2000.0
-assert format_component_value_summary(r1.component) == "2 kΩ"
-
-# Undo back to 1 kOhm before starting simulation
-scene.undo_stack.undo()
-assert r1.component.resistance == 1000.0
-
-# 2. Test value edit + Undo (Ctrl+Z) + Redo (Ctrl+Y) while RUNNING
-win.start_simulation()
-wait_ms(80)
-assert a1.live_display_value == "12 mA", f"Expected 12 mA initially, got {a1.live_display_value!r}"
-assert r1.live_display_value == "1 kΩ"
-
-# Edit R1 from 1 kOhm to 500 Ohm while running -> current becomes 24 mA
-assert scene.edit_component_parameters(r1, {"resistance": "500"}) is True
-wait_ms(80)
-assert r1.component.resistance == 500.0
-assert r1.live_display_value == "500 Ω"
-assert a1.live_display_value == "24 mA", f"Expected 24 mA after live edit, got {a1.live_display_value!r}"
-
-# Undo (Ctrl+Z) while running -> restores 1 kOhm and 12 mA live
-scene.undo_stack.undo()
-wait_ms(80)
-assert r1.component.resistance == 1000.0
-assert r1.live_display_value == "1 kΩ"
-assert a1.live_display_value == "12 mA", f"Expected 12 mA after Undo while running, got {a1.live_display_value!r}"
-
-# Redo (Ctrl+Y) while running -> reapplies 500 Ohm and 24 mA live
-scene.undo_stack.redo()
-wait_ms(80)
-assert r1.component.resistance == 500.0
-assert r1.live_display_value == "500 Ω"
-assert a1.live_display_value == "24 mA", f"Expected 24 mA after Redo while running, got {a1.live_display_value!r}"
-
-win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
-win.close()
-"""
-    res = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(res.stdout.strip())
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert win.sim_controller._thread.isRunning() is True, "Worker QThread should be running during simulation"
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
+    qapp.processEvents()
+    assert win.sim_controller._thread.isRunning() is False, "Worker QThread must stop cleanly when MainWindow closes"
 
 
-def test_6c_close_main_window_while_running_stops_worker_thread_cleanly() -> None:
-    """Item 6c: Closing MainWindow while a simulation is running stops the QThread cleanly."""
-    script = """
-import sys
-from PySide6.QtCore import QEventLoop, QPointF, QTimer
-from PySide6.QtWidgets import QApplication
-
-from circuitsim.app.main_window import MainWindow
-
-app = QApplication(sys.argv)
-win = MainWindow()
-win.show()
-scene = win.circuit_scene
-
-scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
-scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
-scene.place_new_component("ground", QPointF(0, 60))
-scene.add_wire([(0, -40), (100, -40)])
-scene.add_wire([(0, 40), (100, 40)])
-
-win.start_simulation()
-loop = QEventLoop()
-QTimer.singleShot(80, loop.quit)
-loop.exec()
-
-assert win.sim_controller._thread.isRunning() is True, "Worker QThread should be running during simulation"
-win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
-win.close()
-app.processEvents()
-assert win.sim_controller._thread.isRunning() is False, "Worker QThread must stop cleanly when MainWindow closes"
-"""
-    res = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(res.stdout.strip())
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-
-
-def test_6d_canvas_item_and_wire_highlight_colors_and_status_bar_text() -> None:
+def test_6d_canvas_item_and_wire_highlight_colors_and_status_bar_text(qapp) -> None:
     """Item 6d: Real canvas item and wire colour state:
     - 'no_ground' highlights items and wires in red ('#FF5252'),
     - 'ammeter_in_parallel' highlights in amber ('#FFA726'),
     - fixing the circuit clears the highlight (None),
     - and status_warnings.text() matches the diagnostic.
     """
-    script = """
-import sys
-from PySide6.QtCore import QEventLoop, QPointF, QTimer
-from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QEventLoop, QPointF, QTimer
+    from circuitsim.app.main_window import MainWindow
 
-from circuitsim.app.main_window import MainWindow
+    win = MainWindow()
+    scene = win.circuit_scene
 
-app = QApplication(sys.argv)
-win = MainWindow()
-scene = win.circuit_scene
+    def wait_ms(ms: int) -> None:
+        loop = QEventLoop()
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
 
-def wait_ms(ms: int) -> None:
-    loop = QEventLoop()
-    QTimer.singleShot(ms, loop.quit)
-    loop.exec()
+    # 1. 'no_ground' -> red highlight ('#FF5252') on components and wires
+    v1 = scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
+    r1 = scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
+    w_top = scene.add_wire([(0, -40), (100, -40)])
+    w_bot = scene.add_wire([(0, 40), (100, 40)])
 
-# 1. 'no_ground' -> red highlight ('#FF5252') on components and wires
-v1 = scene.place_new_component("dc_voltage", QPointF(0, 0), rotation_deg=90)
-r1 = scene.place_new_component("resistor", QPointF(100, 0), rotation_deg=90)
-w_top = scene.add_wire([(0, -40), (100, -40)])
-w_bot = scene.add_wire([(0, 40), (100, 40)])
+    win.start_simulation()
+    wait_ms(80)
 
-win.start_simulation()
-wait_ms(80)
+    assert v1.effective_highlight_color() == "#FF5252"
+    assert r1.effective_highlight_color() == "#FF5252"
+    assert w_top.effective_highlight_color() == "#FF5252"
+    assert w_bot.effective_highlight_color() == "#FF5252"
+    assert "No ground connected" in win.status_warnings.text()
 
-assert v1.effective_highlight_color() == "#FF5252"
-assert r1.effective_highlight_color() == "#FF5252"
-assert w_top.effective_highlight_color() == "#FF5252"
-assert w_bot.effective_highlight_color() == "#FF5252"
-assert "No ground connected" in win.status_warnings.text()
+    # 2. Add Ground + Ammeter in parallel with V1 -> amber highlight ('#FFA726') on ammeter and wires
+    scene.place_new_component("ground", QPointF(0, 60))
+    a1 = scene.place_new_component("ammeter", QPointF(200, 0), rotation_deg=90)
+    w_am_top = scene.add_wire([(100, -40), (200, -40)])
+    w_am_bot = scene.add_wire([(100, 40), (200, 40)])
 
-# 2. Add Ground + Ammeter in parallel with V1 -> amber highlight ('#FFA726') on ammeter and wires
-gnd = scene.place_new_component("ground", QPointF(0, 60))
-a1 = scene.place_new_component("ammeter", QPointF(200, 0), rotation_deg=90)
-w_am_top = scene.add_wire([(100, -40), (200, -40)])
-w_am_bot = scene.add_wire([(100, 40), (200, 40)])
+    win.start_simulation()
+    wait_ms(80)
 
-win.start_simulation()
-wait_ms(80)
+    assert a1.effective_highlight_color() == "#FFA726"
+    assert w_am_top.effective_highlight_color() == "#FFA726"
+    assert w_am_bot.effective_highlight_color() == "#FFA726"
+    assert "Ammeter A1" in win.status_warnings.text()
 
-assert a1.effective_highlight_color() == "#FFA726"
-assert w_am_top.effective_highlight_color() == "#FFA726"
-assert w_am_bot.effective_highlight_color() == "#FFA726"
-assert "Ammeter A1" in win.status_warnings.text()
+    # 3. Fix circuit by deleting the parallel ammeter -> highlights clear to None and status_warnings == 'Simulation Running (OK)'
+    scene.clearSelection()
+    a1.setSelected(True)
+    scene.delete_selected()
+    wait_ms(80)
 
-# 3. Fix circuit by deleting the parallel ammeter -> highlights clear to None and status_warnings == 'Simulation Running (OK)'
-scene.clearSelection()
-a1.setSelected(True)
-scene.delete_selected()
-wait_ms(80)
+    assert v1.effective_highlight_color() is None
+    assert r1.effective_highlight_color() is None
+    assert w_top.effective_highlight_color() is None
+    assert w_bot.effective_highlight_color() is None
+    assert win.status_warnings.text() == "Simulation Running (OK)"
 
-assert v1.effective_highlight_color() is None
-assert r1.effective_highlight_color() is None
-assert w_top.effective_highlight_color() is None
-assert w_bot.effective_highlight_color() is None
-assert win.status_warnings.text() == "Simulation Running (OK)"
-
-win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
-win.close()
-"""
-    res = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(res.stdout.strip())
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
 
 
-def test_6e_ui_responsiveness_on_30_resistor_ladder_plus_rc_load() -> None:
+def test_6e_ui_responsiveness_on_30_resistor_ladder_plus_rc_load(qapp) -> None:
     """Item 6e: Run the UI-responsiveness benchmark on a 30-resistor ladder plus an RC load.
     Reads max-gap threshold from CIRCUITSIM_MAX_UI_GAP_MS (default 180.0 ms).
     """
-    script = """
-import os
-import sys
-import time
-from PySide6.QtCore import QEventLoop, QPointF, QTimer
-from PySide6.QtWidgets import QApplication
+    import os
+    import time
+    from PySide6.QtCore import QEventLoop, QPointF, QTimer
+    from circuitsim.app.main_window import MainWindow
 
-from circuitsim.app.main_window import MainWindow
+    win = MainWindow()
+    scene = win.circuit_scene
 
-app = QApplication(sys.argv)
-win = MainWindow()
-scene = win.circuit_scene
+    scene.place_new_component("ac_voltage", QPointF(0, 0), rotation_deg=90)
+    scene.place_new_component("ground", QPointF(0, 60))
 
-# Build an AC source + 15-stage (30-resistor) ladder + RC load
-# Stage k (k = 0..14):
-# - series resistor from x = k*80 to x = (k+1)*80 along y = -40 (center at (k*80 + 40, -40))
-# - shunt resistor at x = (k+1)*80 from y = -40 to y = 40 (center at ((k+1)*80, 0), rot=90)
-scene.place_new_component("ac_voltage", QPointF(0, 0), rotation_deg=90)  # (0, -40) to (0, 40)
-scene.place_new_component("ground", QPointF(0, 60))                      # (0, 40)
+    for k in range(15):
+        x_left = k * 80
+        x_right = (k + 1) * 80
+        scene.place_new_component("resistor", QPointF(x_left + 40, -40), rotation_deg=0)
+        scene.place_new_component("resistor", QPointF(x_right, 0), rotation_deg=90)
+        scene.add_wire([(x_left, 40), (x_right, 40)])
 
-for k in range(15):
-    x_left = k * 80
-    x_right = (k + 1) * 80
-    # Series resistor (80 px wide, terminals at x_left+0 and x_right+0 when centered at x_left+40)
-    scene.place_new_component("resistor", QPointF(x_left + 40, -40), rotation_deg=0)
-    # Shunt resistor (80 px tall, terminals at (x_right, -40) and (x_right, 40))
-    scene.place_new_component("resistor", QPointF(x_right, 0), rotation_deg=90)
-    # Bottom return wire segment
-    scene.add_wire([(x_left, 40), (x_right, 40)])
+    scene.place_new_component("resistor", QPointF(1240, -40), rotation_deg=0)
+    scene.place_new_component("capacitor", QPointF(1280, 0), rotation_deg=90)
+    scene.add_wire([(1200, 40), (1280, 40)])
 
-# Add RC load at the end of the 30-resistor ladder (x = 1200 to x = 1280)
-scene.place_new_component("resistor", QPointF(1240, -40), rotation_deg=0)
-scene.place_new_component("capacitor", QPointF(1280, 0), rotation_deg=90)
-scene.add_wire([(1200, 40), (1280, 40)])
+    threshold_ms = float(os.environ.get("CIRCUITSIM_MAX_UI_GAP_MS", "180.0"))
+    ui_heartbeats = 0
+    max_gap_ms = 0.0
+    gaps: list[float] = []
+    last_tick = time.perf_counter()
 
-threshold_ms = float(os.environ.get("CIRCUITSIM_MAX_UI_GAP_MS", "180.0"))
-ui_heartbeats = 0
-max_gap_ms = 0.0
-gaps = []
-last_tick = time.perf_counter()
+    def on_heartbeat() -> None:
+        nonlocal ui_heartbeats, max_gap_ms, last_tick
+        now = time.perf_counter()
+        gap_ms = (now - last_tick) * 1000.0
+        if ui_heartbeats > 0:
+            gaps.append(gap_ms)
+            if gap_ms > max_gap_ms:
+                max_gap_ms = gap_ms
+        last_tick = now
+        ui_heartbeats += 1
 
-def on_heartbeat():
-    global ui_heartbeats, max_gap_ms, last_tick
-    now = time.perf_counter()
-    gap_ms = (now - last_tick) * 1000.0
-    if ui_heartbeats > 0:
-        gaps.append(gap_ms)
-        if gap_ms > max_gap_ms:
-            max_gap_ms = gap_ms
-    last_tick = now
-    ui_heartbeats += 1
+    qapp.processEvents()
+    heartbeat_timer = QTimer()
+    heartbeat_timer.setInterval(10)
+    heartbeat_timer.timeout.connect(on_heartbeat)
+    heartbeat_timer.start()
 
-heartbeat_timer = QTimer()
-heartbeat_timer.setInterval(10)
-heartbeat_timer.timeout.connect(on_heartbeat)
-heartbeat_timer.start()
+    win.start_simulation()
+    loop = QEventLoop()
+    QTimer.singleShot(300, loop.quit)
+    loop.exec()
+    heartbeat_timer.stop()
 
-win.start_simulation()
-loop = QEventLoop()
-QTimer.singleShot(300, loop.quit)
-loop.exec()
-heartbeat_timer.stop()
+    avg_gap_ms = sum(gaps) / len(gaps) if gaps else 0.0
+    print(f"BENCHMARK_6E: heartbeats={ui_heartbeats}, avg_gap_ms={avg_gap_ms:.2f}, max_gap_ms={max_gap_ms:.2f}, threshold_ms={threshold_ms:.1f}")
 
-avg_gap_ms = sum(gaps) / len(gaps) if gaps else 0.0
-print(f"BENCHMARK_6E: heartbeats={ui_heartbeats}, avg_gap_ms={avg_gap_ms:.2f}, max_gap_ms={max_gap_ms:.2f}, threshold_ms={threshold_ms:.1f}")
+    assert win._sim_state.value == "running", f"Expected running state, got {win._sim_state}"
+    assert ui_heartbeats >= 12, f"Expected >= 12 UI heartbeats during 300 ms ladder run, got {ui_heartbeats}"
+    assert max_gap_ms < threshold_ms, f"Main UI thread stalled for {max_gap_ms:.2f} ms (threshold {threshold_ms:.1f} ms)"
 
-assert win._sim_state.value == "running", f"Expected running state, got {win._sim_state}"
-assert ui_heartbeats >= 12, f"Expected >= 12 UI heartbeats during 300 ms ladder run, got {ui_heartbeats}"
-assert max_gap_ms < threshold_ms, f"Main UI thread stalled for {max_gap_ms:.2f} ms (threshold {threshold_ms:.1f} ms)"
-
-win.circuit_scene.undo_stack.setClean()  # no 'unsaved changes' prompt in tests
-win.close()
-"""
-    res = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    print(res.stdout.strip())
-    assert res.returncode == 0, f"Subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
