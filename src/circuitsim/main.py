@@ -95,9 +95,16 @@ def run_gui() -> int:
     from PySide6.QtWidgets import QApplication
     from circuitsim.app.crash_handler import install_global_exception_hook
     from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.settings import (
+        configure_qt_identity,
+        get_default_data_dir,
+        migrate_legacy_data_files,
+    )
 
-    install_global_exception_hook()
+    configure_qt_identity()
     app = QApplication.instance() or QApplication(sys.argv)
+    migrate_legacy_data_files(get_default_data_dir())
+    install_global_exception_hook()
     window = MainWindow()
     window.show()
     return app.exec()

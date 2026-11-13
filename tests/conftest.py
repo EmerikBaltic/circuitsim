@@ -40,7 +40,9 @@ def assert_module_has_no_qt_imports(*module_names: str) -> None:
 def qapp():
     """Provide one shared offscreen QApplication for the entire test session."""
     from PySide6.QtWidgets import QApplication
+    from circuitsim.app.settings import configure_qt_identity
 
+    configure_qt_identity()
     app = QApplication.instance()
     if app is None:
         app = QApplication([sys.argv[0]])

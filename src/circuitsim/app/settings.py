@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from typing import Any
 
+from circuitsim.app_info import APP_NAME, APP_USER_MODEL_ID, ORG_NAME
+
 MAX_RECENT_FILES: int = 8
 SETTINGS_FILENAME: str = "settings.json"
+MIGRATABLE_USER_FILES: tuple[str, ...] = ("settings.json", "crash.log", "recent_files.json")
 
 
 def get_default_data_dir() -> Path:
-    """Return default user application data directory for CircuitSim."""
-    override = os.environ.get("CIRCUITSIM_DATA_DIR")
+    """Return default user application data directory for Ohmbench."""
+    override = os.environ.get("OHMBENCH_DATA_DIR") or os.environ.get("CIRCUITSIM_DATA_DIR")
     if override:
         p = Path(override)
         p.mkdir(parents=True, exist_ok=True)
@@ -34,18 +39,91 @@ def get_default_data_dir() -> Path:
 
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
-        p = Path(appdata) / "CircuitSim" if appdata else Path.home() / ".circuitsim"
+        p = Path(appdata) / APP_NAME if appdata else Path.home() / f".{APP_NAME.lower()}"
     elif sys.platform == "darwin":
-        p = Path.home() / "Library" / "Application Support" / "CircuitSim"
+        p = Path.home() / "Library" / "Application Support" / APP_NAME
     else:
         xdg = os.environ.get("XDG_DATA_HOME")
         p = (
-            Path(xdg) / "circuitsim"
+            Path(xdg) / APP_NAME.lower()
             if xdg
-            else Path.home() / ".local" / "share" / "circuitsim"
+            else Path.home() / ".local" / "share" / APP_NAME.lower()
         )
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def get_legacy_data_dirs() -> list[Path]:
+    """Return legacy pre-rename user data directories (e.g. AppData\\Roaming\\python)."""
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            candidates.append(Path(appdata) / "python")
+            candidates.append(Path(appdata) / "CircuitSim")
+        candidates.append(Path.home() / ".circuitsim")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+        candidates.append(base / "python")
+        candidates.append(base / "CircuitSim")
+    else:
+        xdg = Path(os.environ["XDG_DATA_HOME"]) if os.environ.get("XDG_DATA_HOME") else Path.home() / ".local" / "share"
+        candidates.append(xdg / "python")
+        candidates.append(xdg / "circuitsim")
+    return candidates
+
+
+def migrate_legacy_data_files(
+    target_dir: Path,
+    *,
+    legacy_dirs: Iterable[Path] | None = None,
+) -> list[str]:
+    """Copy existing user files from legacy directories into target_dir once (never deletes originals)."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_resolved = target_dir.resolve()
+    copied: list[str] = []
+    search_dirs = list(legacy_dirs) if legacy_dirs is not None else get_legacy_data_dirs()
+    for src_dir in search_dirs:
+        try:
+            if not src_dir.exists() or src_dir.resolve() == target_resolved:
+                continue
+        except OSError:
+            continue
+        for filename in MIGRATABLE_USER_FILES:
+            src_file = src_dir / filename
+            dst_file = target_dir / filename
+            if src_file.is_file() and not dst_file.exists():
+                try:
+                    shutil.copy2(src_file, dst_file)
+                    copied.append(filename)
+                except OSError:
+                    pass
+    return copied
+
+
+def set_windows_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> bool:
+    """Set Windows AppUserModelID for taskbar icon grouping when running on win32."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        return True
+    except Exception:
+        return False
+
+
+def configure_qt_identity() -> None:
+    """Configure Qt organization/application identity and platform AppUserModelID."""
+    try:
+        from PySide6.QtCore import QCoreApplication
+
+        QCoreApplication.setOrganizationName(ORG_NAME)
+        QCoreApplication.setApplicationName(APP_NAME)
+    except Exception:
+        pass
+    set_windows_app_user_model_id()
 
 
 class AppSettings:
