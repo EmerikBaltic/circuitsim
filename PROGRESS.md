@@ -14,7 +14,7 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## HYDROGEN QUEUE (Last Commit: phase-2.6)
+## HYDROGEN QUEUE (Last Commit: phase-3)
 ### Phase 0: Verify
 - [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
 
@@ -31,11 +31,11 @@
 - [x] 2.6 Docs (`README.md`, docs, `"Formerly CircuitSim"`, Stage 2 plan in `PROGRESS.md`) - *done*
 
 ### Phase 3: Mutation Check (on `main`)
-- [ ] 3a Component empty value plate mutation vs LED stray-background test - *todo*
-- [ ] 3b Problems panel close button blank draw mutation vs blank-button test - *todo*
-- [ ] 3c Light theme palette missing attribute mutation vs palette test - *todo*
-- [ ] 3d Swap LED anode/cathode terminals vs LED symbol test - *todo*
-- [ ] 3e Unguarded `paint()` exception vs paint safety test - *todo*
+- [x] 3a Component empty value plate mutation vs `test_reproduce_and_verify_no_stray_background_under_led` - *done (FAILED: 2592 stray pixels, restored cleanly)*
+- [x] 3b Problems panel close button blank draw mutation vs `test_no_blank_buttons_or_icons_in_both_themes` - *done (FAILED: Blank button ProblemsCloseBtn, restored cleanly)*
+- [x] 3c Light theme palette missing attribute mutation vs `test_every_palette_attribute_in_code_exists_in_both_themes` - *done (FAILED: missing symbol_label, restored cleanly)*
+- [x] 3d Swap LED anode/cathode terminals vs `test_led_palette_entry_and_metadata` - *done (FAILED: swapped terminals & SVG viewBox, restored cleanly)*
+- [x] 3e Unguarded `paint()` exception vs `test_paint_safety_guard_on_component_wire_and_junction` - *done (FAILED: exception uncaught, restored cleanly)*
 
 ### Phase 4: Wire Redesign, Step 4A-1 (branch `wire-redesign`)
 - [ ] 4.1 Scene state (`WireGraph`) and undo/redo + move merge + `add_wire` between attachments - *todo*
