@@ -14,7 +14,7 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## HYDROGEN QUEUE (Last Commit: phase-2.1)
+## HYDROGEN QUEUE (Last Commit: phase-2.2)
 ### Phase 0: Verify
 - [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
 
@@ -24,7 +24,7 @@
 
 ### Phase 2: Rename to Ohmbench, Stage 1 (on `main`)
 - [x] 2.1 Rename Inventory in `PROGRESS.md` - *done*
-- [ ] 2.2 Single source of truth `src/circuitsim/app_info.py` (no Qt) and user-visible strings - *todo*
+- [x] 2.2 Single source of truth `src/circuitsim/app_info.py` (no Qt) and user-visible strings - *done*
 - [ ] 2.3 App Identity (`QCoreApplication` org/app = Ohmbench, one-time migration from `python`, Windows `AppUserModelID`) - *todo*
 - [ ] 2.4 Stored Data (`.circ` backward compatibility and format identifier choice) - *todo*
 - [ ] 2.5 Tests (verify user-visible strings use `APP_NAME`, list legitimate old-name strings) - *todo*

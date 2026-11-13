@@ -305,7 +305,7 @@ def test_corrupt_and_unknown_version_errors() -> None:
     with pytest.raises(CircuitFileError, match="damaged or incomplete"):
         loads_document_v2('{"format": "circuitsim", "schema_version": 2, invalid}')
 
-    with pytest.raises(CircuitFileError, match="not a CircuitSim file"):
+    with pytest.raises(CircuitFileError, match="not an Ohmbench file"):
         loads_document_v2('{"format": "wrong", "schema_version": 2}')
 
     with pytest.raises(CircuitFileError, match="made by a newer version"):

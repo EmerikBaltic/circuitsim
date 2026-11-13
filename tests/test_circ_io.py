@@ -298,15 +298,15 @@ def test_truncated_and_corrupted_files() -> None:
 
 
 def test_wrong_format_files() -> None:
-    _expect_error("[1, 2, 3]", "not a CircuitSim file")
-    _expect_error('{"hello": "world"}', "not a CircuitSim file")
-    _expect_error('{"format": "other", "schema_version": 1}', "not a CircuitSim file")
+    _expect_error("[1, 2, 3]", "not an Ohmbench file")
+    _expect_error('{"hello": "world"}', "not an Ohmbench file")
+    _expect_error('{"format": "other", "schema_version": 1}', "not an Ohmbench file")
 
 
 def test_newer_and_unknown_versions() -> None:
     data = json.loads(_valid_text())
     data["schema_version"] = 2
-    _expect_error(json.dumps(data), "made by a newer version of CircuitSim")
+    _expect_error(json.dumps(data), "made by a newer version of Ohmbench")
     data["schema_version"] = "one"
     _expect_error(json.dumps(data), "valid version number")
     data["schema_version"] = 0
@@ -500,7 +500,7 @@ def test_bad_files_show_message_and_leave_scene_unchanged(tmp_path, qapp) -> Non
         assert snapshot() == before, "scene changed by " + name
         assert scene.undo_stack.count() == undo_before
     assert len(errors) == len(bad_cases), errors
-    assert any("newer version of CircuitSim" in e for e in errors)
+    assert any("newer version of Ohmbench" in e for e in errors)
     assert any("empty" in e for e in errors)
     assert win.open_path(tmp_path / "does_not_exist.circ") is False
     assert snapshot() == before
@@ -747,7 +747,7 @@ def test_quiet_shutdown_error_logging_without_dialog(tmp_path, qapp, monkeypatch
         content1 = log_file.read_text(encoding="utf-8")
         assert "Runtime error while app is running" in content1
         assert len(dialogs_shown) == 1
-        assert "CircuitSim Error" in dialogs_shown[0][0]
+        assert "Ohmbench Error" in dialogs_shown[0][0]
 
         dialogs_shown.clear()
         ch.set_shutting_down(True)

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from circuitsim.app.themes import DARK_PALETTE, LIGHT_PALETTE, ThemePalette
+from circuitsim.app_info import APP_NAME
 from circuitsim.canvas.symbol_geometry import GRID_PITCH_PX
 from circuitsim.canvas.symbol_renderer import SymbolLibrary
 
@@ -207,7 +208,7 @@ def _draw_preview_cell(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Preview all CircuitSim IEC symbols in Dark and Light themes."
+        description=f"Preview all {APP_NAME} IEC symbols in Dark and Light themes."
     )
     parser.add_argument(
         "--export",
@@ -232,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     win = QMainWindow()
-    win.setWindowTitle("CircuitSim — IEC Symbol Preview (Dark & Light Themes)")
+    win.setWindowTitle(f"{APP_NAME} — IEC Symbol Preview (Dark & Light Themes)")
     win.resize(800, 760)
 
     scroll = QScrollArea()

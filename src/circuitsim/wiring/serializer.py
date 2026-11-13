@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from circuitsim.app_info import APP_NAME
 from circuitsim.canvas.symbol_geometry import (
     DEFAULT_IEC_SYMBOLS_DIR,
     SymbolMetadata,
@@ -175,7 +176,7 @@ def dumps_document_v2(doc: CircuitDocumentV2) -> str:
 def dict_to_document_v2(data: object) -> CircuitDocumentV2:
     """Parse a v2 document dictionary into CircuitDocumentV2."""
     if not isinstance(data, dict) or data.get("format") != FORMAT_NAME:
-        raise CircuitFileError("This is not a CircuitSim file (the 'format' marker is missing).")
+        raise CircuitFileError(f"This is not an {APP_NAME} file (the 'format' marker is missing).")
     version = data.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):
         raise CircuitFileError("The file has no valid version number.")
@@ -184,8 +185,8 @@ def dict_to_document_v2(data: object) -> CircuitDocumentV2:
         return migrate_v1_to_v2(data)
     if version > SCHEMA_VERSION_V2:
         raise CircuitFileError(
-            f"This file was made by a newer version of CircuitSim (file version {version}, "
-            f"this program understands up to {SCHEMA_VERSION_V2}). Please update CircuitSim to open it."
+            f"This file was made by a newer version of {APP_NAME} (file version {version}, "
+            f"this program understands up to {SCHEMA_VERSION_V2}). Please update {APP_NAME} to open it."
         )
     if version < 1:
         raise CircuitFileError(f"Unknown file version number {version}.")
@@ -487,7 +488,7 @@ def load_document_v2(path: str | os.PathLike[str]) -> CircuitDocumentV2:
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
-        raise CircuitFileError(f"'{p.name}' is not a text file, so it is not a CircuitSim circuit.") from exc
+        raise CircuitFileError(f"'{p.name}' is not a text file, so it is not an {APP_NAME} circuit.") from exc
     return loads_document_v2(text)
 
 

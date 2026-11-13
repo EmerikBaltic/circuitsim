@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from circuitsim.app_info import APP_NAME
 from circuitsim.components import (
     ACVoltageSource,
     Ammeter,
@@ -42,7 +43,7 @@ def run_demo() -> int:
     dc_solver = MNASolver(dc_circuit)
     dc_result = dc_solver.solve_dc()
 
-    print("=== CircuitSim Milestone 1 Engine Demo ===")
+    print(f"=== {APP_NAME} Milestone 1 Engine Demo ===")
     print("[DC Operating Point]")
     print(f"  Node 'in' voltage : {dc_result.node_voltages['in']:.4f} V")
     print(f"  Node 'mid' voltage: {dc_result.node_voltages['mid']:.4f} V")
@@ -103,7 +104,7 @@ def run_gui() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="CircuitSim Desktop Application")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} Desktop Application")
     parser.add_argument(
         "--demo",
         action="store_true",

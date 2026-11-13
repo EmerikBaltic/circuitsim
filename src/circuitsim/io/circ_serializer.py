@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from circuitsim.app_info import APP_NAME
 from circuitsim.canvas.connectivity import PlacedComponentSpec, PointPx, WireSpec
 from circuitsim.components.base import Component
 from circuitsim.components.factory import (
@@ -209,16 +210,16 @@ def dumps_document(doc: CircuitDocument) -> str:
 def _check_header(data: object) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("format") != FORMAT_NAME:
         raise CircuitFileError(
-            "This is not a CircuitSim file (the 'format' marker is missing)."
+            f"This is not an {APP_NAME} file (the 'format' marker is missing)."
         )
     version = data.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):
         raise CircuitFileError("The file has no valid version number.")
     if version > SCHEMA_VERSION:
         raise CircuitFileError(
-            "This file was made by a newer version of CircuitSim "
+            f"This file was made by a newer version of {APP_NAME} "
             f"(file version {version}, this program understands up to "
-            f"{SCHEMA_VERSION}). Please update CircuitSim to open it."
+            f"{SCHEMA_VERSION}). Please update {APP_NAME} to open it."
         )
     if version < 1:
         raise CircuitFileError(f"Unknown file version number {version}.")
@@ -415,7 +416,7 @@ def load_document(path: str | os.PathLike[str]) -> CircuitDocument:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise CircuitFileError(
-            f"'{p.name}' is not a text file, so it is not a CircuitSim circuit."
+            f"'{p.name}' is not a text file, so it is not an {APP_NAME} circuit."
         ) from exc
     return loads_document(text)
 

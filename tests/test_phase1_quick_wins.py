@@ -585,8 +585,8 @@ def test_task7_about_feedback_and_crash_log(tmp_path: Path, qapp) -> None:
 
     version = get_app_version()
     assert version == "0.1.0", f"Expected version '0.1.0', got '{version}'"
-    assert REPO_URL == "https://github.com/EmerikBaltic/circuitsim"
-    assert ISSUES_URL == "https://github.com/EmerikBaltic/circuitsim/issues"
+    assert REPO_URL == "https://github.com/EmerikBaltic/ohmbench"
+    assert ISSUES_URL == "https://github.com/EmerikBaltic/ohmbench/issues"
 
     # 2. Crash log writing
     log_dir1 = tmp_path / "log1"
@@ -598,7 +598,7 @@ def test_task7_about_feedback_and_crash_log(tmp_path: Path, qapp) -> None:
 
     assert log_path.exists(), "crash.log must be written"
     content = log_path.read_text(encoding="utf-8")
-    assert "CircuitSim Crash Report:" in content
+    assert "Ohmbench Crash Report:" in content
     assert "Version:        0.1.0" in content
     assert "Python:" in content
     assert "PySide6:" in content
@@ -631,7 +631,7 @@ def test_task7_about_feedback_and_crash_log(tmp_path: Path, qapp) -> None:
     assert win.act_report_issue is not None
     assert "Report a problem" in win.act_report_issue.text()
     assert win.act_about is not None
-    assert "About CircuitSim" in win.act_about.text()
+    assert "About Ohmbench" in win.act_about.text()
 
     scene = win.circuit_scene
     scene.undo_stack.setClean()

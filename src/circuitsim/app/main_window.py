@@ -24,16 +24,20 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from circuitsim.app.crash_handler import (
-    ISSUES_URL,
-    REPO_URL,
-    get_app_version,
-)
 from circuitsim.app.palette_dock import ComponentPaletteWidget
 from circuitsim.app.problems_panel import ProblemsDock
 from circuitsim.app.settings import AppSettings
 from circuitsim.app.sim_worker import SimulationWorkerController
 from circuitsim.app.themes import ThemeMode, build_stylesheet, get_theme_palette
+from circuitsim.app_info import (
+    APP_DESCRIPTION,
+    APP_NAME,
+    APP_SUBTITLE,
+    ISSUES_URL,
+    LICENSE_NAME,
+    REPO_URL,
+    get_app_version,
+)
 from circuitsim.canvas.component_item import (
     ComponentItem,
     format_component_value_summary,
@@ -134,7 +138,7 @@ class _StatusWarningsLabel(QLabel):
 
 
 class MainWindow(QMainWindow):
-    """Dockable main window for CircuitSim (Section 2 of specification)."""
+    """Dockable main window for Ohmbench (Section 2 of specification)."""
 
     def __init__(
         self,
@@ -143,7 +147,7 @@ class MainWindow(QMainWindow):
         settings: AppSettings | None = None,
     ) -> None:
         super().__init__()
-        self.setWindowTitle("CircuitSim — Electrical Circuit Simulator")
+        self.setWindowTitle(f"{APP_NAME} — {APP_SUBTITLE}")
         self.resize(1360, 840)
 
         self.settings: AppSettings = (
@@ -407,8 +411,8 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.act_report_issue)
 
         help_menu.addSeparator()
-        self.act_about = QAction("&About CircuitSim", self)
-        self.act_about.setToolTip("About CircuitSim")
+        self.act_about = QAction(f"&About {APP_NAME}", self)
+        self.act_about.setToolTip(f"About {APP_NAME}")
         self.act_about.triggered.connect(self._show_about_dialog)
         help_menu.addAction(self.act_about)
 
@@ -676,7 +680,7 @@ class MainWindow(QMainWindow):
             return
         name = self._current_path.name if self._current_path else "Untitled"
         star = "*" if self.has_unsaved_changes() else ""
-        self.setWindowTitle(f"{name}{star} — CircuitSim")
+        self.setWindowTitle(f"{name}{star} — {APP_NAME}")
 
     def has_unsaved_changes(self) -> bool:
         if self._is_closing:
@@ -731,7 +735,7 @@ class MainWindow(QMainWindow):
             return
         start_dir = str(self._current_path.parent) if self._current_path else ""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open circuit", start_dir, "CircuitSim circuits (*.circ);;All files (*)"
+            self, "Open circuit", start_dir, f"{APP_NAME} circuits (*.circ);;All files (*)"
         )
         if path:
             self.open_path(path)
@@ -791,7 +795,7 @@ class MainWindow(QMainWindow):
     def _on_save_circuit_as(self) -> bool:
         start = str(self._current_path) if self._current_path else "circuit.circ"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save circuit as", start, "CircuitSim circuits (*.circ)"
+            self, "Save circuit as", start, f"{APP_NAME} circuits (*.circ)"
         )
         if not path:
             return False
@@ -871,13 +875,13 @@ class MainWindow(QMainWindow):
     def _show_about_dialog(self) -> None:
         version = get_app_version()
         text = (
-            f"<h3>CircuitSim v{version}</h3>"
-            f"<p>Educational desktop electrical circuit simulator built with Python, NumPy/SciPy, and PySide6.</p>"
-            f"<p><b>License:</b> MIT License</p>"
+            f"<h3>{APP_NAME} v{version}</h3>"
+            f"<p>{APP_DESCRIPTION}</p>"
+            f"<p><b>License:</b> {LICENSE_NAME}</p>"
             f"<p><b>Source Code:</b> <a href='{REPO_URL}'>{REPO_URL}</a></p>"
             f"<p><b>Report Issues / Feedback:</b> <a href='{ISSUES_URL}'>{ISSUES_URL}</a></p>"
         )
-        QMessageBox.about(self, "About CircuitSim", text)
+        QMessageBox.about(self, f"About {APP_NAME}", text)
 
     def _open_preferences_dialog(self) -> None:
         dlg = PreferencesDialog(self.settings, self)

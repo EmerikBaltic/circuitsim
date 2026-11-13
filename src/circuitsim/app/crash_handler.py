@@ -22,9 +22,7 @@ except Exception:
     _orig_critical = None
 
 from circuitsim.app.settings import AppSettings, get_default_data_dir
-
-REPO_URL: str = "https://github.com/EmerikBaltic/circuitsim"
-ISSUES_URL: str = "https://github.com/EmerikBaltic/circuitsim/issues"
+from circuitsim.app_info import APP_NAME, ISSUES_URL, REPO_URL, get_app_version
 
 _shutting_down: bool = False
 _dialog_active: bool = False
@@ -101,27 +99,6 @@ def compute_error_signature(
     return (exc_name, msg, top_frame)
 
 
-def get_app_version() -> str:
-    """Return the package version of CircuitSim."""
-    try:
-        import importlib.metadata
-
-        return importlib.metadata.version("circuitsim")
-    except Exception:
-        pass
-    # Fallback to pyproject.toml
-    try:
-        toml_path = Path(__file__).resolve().parents[3] / "pyproject.toml"
-        if toml_path.exists():
-            import tomllib
-
-            data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
-            return str(data.get("project", {}).get("version", "0.1.0"))
-    except Exception:
-        pass
-    return "0.1.0"
-
-
 def format_crash_report(
     exctype: type[BaseException],
     value: BaseException,
@@ -132,7 +109,7 @@ def format_crash_report(
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     lines = [
         "=" * 70,
-        f"CircuitSim Crash Report: {now}",
+        f"{APP_NAME} Crash Report: {now}",
         f"Occurrences:    {count}",
         f"Version:        {get_app_version()}",
         f"Python:         {sys.version.split()[0]} ({platform.python_implementation()})",
@@ -219,7 +196,7 @@ def create_crash_dialog(
     """Construct a QMessageBox error dialog with OK and Quit buttons and repeat count."""
     from PySide6.QtWidgets import QMessageBox
 
-    msg = f"CircuitSim encountered an unexpected error:\n\n{message}\n\n"
+    msg = f"{APP_NAME} encountered an unexpected error:\n\n{message}\n\n"
     if count > 1:
         msg += f"This error occurred {count} times.\n\n"
     if log_path:
@@ -228,7 +205,7 @@ def create_crash_dialog(
 
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Critical)
-    box.setWindowTitle("CircuitSim Error")
+    box.setWindowTitle(f"{APP_NAME} Error")
     box.setText(msg)
     ok_btn = box.addButton(QMessageBox.StandardButton.Ok)
     quit_btn = box.addButton("Quit", QMessageBox.ButtonRole.DestructiveRole)
@@ -253,13 +230,13 @@ def show_crash_dialog(
             return False
 
         if _orig_critical is not None and QMessageBox.critical is not _orig_critical:
-            msg = f"CircuitSim encountered an unexpected error:\n\n{message}\n\n"
+            msg = f"{APP_NAME} encountered an unexpected error:\n\n{message}\n\n"
             if count > 1:
                 msg += f"This error occurred {count} times.\n\n"
             if log_path:
                 msg += f"A crash log has been saved to:\n{log_path}\n\n"
             msg += f"Please report this issue at:\n{ISSUES_URL}"
-            return QMessageBox.critical(parent, "CircuitSim Error", msg)
+            return QMessageBox.critical(parent, f"{APP_NAME} Error", msg)
 
         box = create_crash_dialog(message, count=count, log_path=log_path, parent=parent)
 
