@@ -149,3 +149,76 @@ def test_circ_format_backward_and_forward_compatibility(tmp_path: Path) -> None:
     }
     assert loads_document_v2(json.dumps(legacy_v2_payload)).placed[0].component.name == "R1"
     assert loads_document_v2(json.dumps(dict(legacy_v2_payload, format="ohmbench"))).placed[0].component.name == "R1"
+
+
+def test_all_user_visible_strings_use_ohmbench_not_circuitsim(qapp, tmp_path: Path, monkeypatch, capsys) -> None:
+    """Assert user-visible UI, dialog, log, CLI, and serializer strings say Ohmbench, not CircuitSim."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from circuitsim.app.crash_handler import create_crash_dialog, format_crash_report
+    from circuitsim.app.main_window import MainWindow
+    from circuitsim.app.settings import AppSettings
+    from circuitsim.app_info import APP_NAME, ISSUES_URL, REPO_URL
+    from circuitsim.io.circ_serializer import CircuitFileError, load_document, loads_document
+    from circuitsim.main import run_demo
+    from circuitsim.wiring.serializer import load_document_v2, loads_document_v2
+
+    win = MainWindow(settings=AppSettings(data_dir=tmp_path / "settings"))
+    try:
+        assert APP_NAME in win.windowTitle()
+        assert "CircuitSim" not in win.windowTitle()
+
+        win._update_window_title()
+        assert APP_NAME in win.windowTitle()
+        assert "CircuitSim" not in win.windowTitle()
+
+        assert APP_NAME in win.act_about.text()
+        assert "CircuitSim" not in win.act_about.text()
+        assert APP_NAME in win.act_about.toolTip()
+        assert "CircuitSim" not in win.act_about.toolTip()
+
+        about_calls: list[tuple[str, str]] = []
+        monkeypatch.setattr(QMessageBox, "about", staticmethod(lambda _p, t, body: about_calls.append((t, body))))
+        win._show_about_dialog()
+        assert len(about_calls) == 1
+        about_title, about_body = about_calls[0]
+        assert APP_NAME in about_title and "CircuitSim" not in about_title
+        assert APP_NAME in about_body and "CircuitSim" not in about_body
+        assert REPO_URL in about_body and ISSUES_URL in about_body
+
+        # Dialog & log header
+        report = format_crash_report(ValueError, ValueError("boom"), None)
+        assert APP_NAME in report and "CircuitSim" not in report
+        crash_box = create_crash_dialog("boom")
+        assert APP_NAME in crash_box.windowTitle() and "CircuitSim" not in crash_box.windowTitle()
+        assert APP_NAME in crash_box.text() and "CircuitSim" not in crash_box.text()
+        crash_box.close()
+
+        # Serializer errors
+        for bad in ('{"format": "bad", "schema_version": 1}', '{"format": "circuitsim", "schema_version": 99}'):
+            try:
+                loads_document(bad)
+            except CircuitFileError as exc:
+                assert APP_NAME in str(exc) and "CircuitSim" not in str(exc)
+            try:
+                loads_document_v2(bad)
+            except CircuitFileError as exc:
+                assert APP_NAME in str(exc) and "CircuitSim" not in str(exc)
+
+        binary_file = tmp_path / "binary.circ"
+        binary_file.write_bytes(b"\xff\xfe\x00\x80")
+        for fn in (load_document, load_document_v2):
+            try:
+                fn(binary_file)
+            except CircuitFileError as exc:
+                assert APP_NAME in str(exc) and "CircuitSim" not in str(exc)
+
+        # CLI demo banner
+        rc = run_demo()
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert APP_NAME in out and "CircuitSim" not in out
+    finally:
+        win.circuit_scene.undo_stack.setClean()
+        win._switch_modified = False
+        win.close()
