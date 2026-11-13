@@ -301,3 +301,101 @@ print("CLOSE_BTN_AND_ICONS_OK")
     res = _run_qt_script(script)
     assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     assert "CLOSE_BTN_AND_ICONS_OK" in res.stdout
+
+
+def test_no_blank_buttons_or_icons_in_both_themes() -> None:
+    """Scan every dialog, panel, toolbar button, and menu/severity icon in dark and light themes."""
+    script = """
+import sys
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QApplication, QAbstractButton, QMenu
+from circuitsim.app.main_window import MainWindow
+from circuitsim.app.problems_panel import ProblemsPanel, make_severity_icon
+from circuitsim.app.themes import ThemeMode
+from circuitsim.canvas.export import ExportOptionsDialog
+from circuitsim.components import Ammeter, LED, Lightbulb, Resistor, Voltmeter
+from circuitsim.dialogs.preferences_dialog import PreferencesDialog
+from circuitsim.dialogs.quick_edit_dialog import QuickValueDialog
+from circuitsim.engine.simulation_session import ProblemDiagnostic
+
+app = QApplication.instance() or QApplication(sys.argv)
+
+def has_non_uniform_pixels(img: QImage) -> bool:
+    if img.isNull() or img.width() == 0 or img.height() == 0:
+        return False
+    c0 = img.pixel(0, 0)
+    for y in range(img.height()):
+        for x in range(img.width()):
+            if img.pixel(x, y) != c0:
+                return True
+    return False
+
+def assert_button_not_blank(btn: QAbstractButton, ctx: str) -> None:
+    # Skip Qt-internal hidden/squashed titlebar & overflow buttons
+    if btn.objectName() in ("qt_toolbar_ext_button", "qt_dockwidget_closebutton", "qt_dockwidget_floatbutton"):
+        return
+    txt = btn.text().strip()
+    icon = btn.icon()
+    btn.ensurePolished()
+    if btn.width() <= 0 or btn.height() <= 0:
+        btn.resize(btn.sizeHint().expandedTo(QSize(24, 24)))
+    img = btn.grab().toImage()
+    assert has_non_uniform_pixels(img), f"Blank button in {ctx}: {btn.objectName() or type(btn).__name__}"
+    assert txt or not icon.isNull() or has_non_uniform_pixels(img), f"Button has no text, icon, or custom paint: {ctx}"
+
+for theme_name in ("dark", "light"):
+    win = MainWindow()
+    win.apply_theme(ThemeMode(theme_name))
+    win.show()
+    app.processEvents()
+
+    panel = win.problems_dock.findChild(ProblemsPanel)
+    assert panel is not None
+    panel.update_diagnostics([
+        ProblemDiagnostic(code="no_ground", severity="error", message="No ground", component_names=("V1",)),
+        ProblemDiagnostic(code="ammeter_in_parallel", severity="warning", message="Ammeter parallel", component_names=("A1",)),
+    ])
+    win.problems_dock.show()
+    app.processEvents()
+
+    for btn in win.findChildren(QAbstractButton):
+        if btn.isVisible():
+            assert_button_not_blank(btn, f"MainWindow({theme_name})")
+
+    for sev in ("error", "warning", "info"):
+        ic = make_severity_icon(sev)
+        assert not ic.isNull()
+        assert has_non_uniform_pixels(ic.pixmap(16, 16).toImage()), f"Blank severity icon {sev}"
+
+    for menu in win.menuBar().findChildren(QMenu):
+        for act in menu.actions():
+            if not act.icon().isNull():
+                assert has_non_uniform_pixels(act.icon().pixmap(16, 16).toImage()), f"Blank menu icon {act.text()}"
+
+    for comp in (LED("D1", "1", "0"), Voltmeter("VM1", "1", "0"), Ammeter("A1", "1", "0"), Resistor("R1", "1", "0"), Lightbulb("L1", "1", "0")):
+        dlg = QuickValueDialog(comp)
+        dlg.show()
+        app.processEvents()
+        for btn in dlg.findChildren(QAbstractButton):
+            if btn.isVisible():
+                assert_button_not_blank(btn, f"QuickValueDialog({type(comp).__name__}, {theme_name})")
+        dlg.close()
+
+    for dlg in (PreferencesDialog(win.settings), ExportOptionsDialog(ThemeMode(theme_name))):
+        dlg.show()
+        app.processEvents()
+        for btn in dlg.findChildren(QAbstractButton):
+            if btn.isVisible():
+                assert_button_not_blank(btn, f"{type(dlg).__name__}({theme_name})")
+        dlg.close()
+
+    win.circuit_scene.undo_stack.setClean()
+    win.close()
+    app.processEvents()
+
+print("SCAN_ALL_WIDGETS_OK")
+"""
+    res = _run_qt_script(script)
+    assert res.returncode == 0, f"Qt subprocess failed:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    assert "SCAN_ALL_WIDGETS_OK" in res.stdout
