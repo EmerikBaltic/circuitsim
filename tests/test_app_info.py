@@ -94,3 +94,58 @@ def test_legacy_data_migration_copies_once_never_deletes(tmp_path: Path, monkeyp
     copied_again = migrate_legacy_data_files(new_dir, legacy_dirs=[legacy_python])
     assert copied_again == []
     assert (new_dir / "crash.log").read_text(encoding="utf-8") == "newer crash"
+
+
+def test_circ_format_backward_and_forward_compatibility(tmp_path: Path) -> None:
+    """Old 'circuitsim' format files load seamlessly and newly saved files round-trip."""
+    from circuitsim.io.circ_serializer import (
+        FORMAT_NAME,
+        loads_document,
+        dumps_document,
+        save_document,
+        load_document,
+    )
+    from circuitsim.wiring.serializer import loads_document_v2
+
+    legacy_v1_payload = {
+        "format": "circuitsim",
+        "schema_version": 1,
+        "view": {"theme": "dark", "zoom": 1.0, "pan": [0.0, 0.0], "simulation_speed": "1x"},
+        "components": [
+            {
+                "name": "R1",
+                "type": "resistor",
+                "center_px": [0, 0],
+                "rotation_deg": 0,
+                "flipped_h": False,
+                "parameters": {"resistance": 1000.0},
+                "settings": {},
+            }
+        ],
+        "wires": [],
+        "junctions": [],
+    }
+    doc_old = loads_document(json.dumps(legacy_v1_payload))
+    assert doc_old.placed[0].component.name == "R1"
+
+    saved_path = tmp_path / "roundtrip.circ"
+    save_document(saved_path, doc_old)
+    loaded = load_document(saved_path)
+    assert loaded.placed[0].component.name == "R1"
+    raw_saved = json.loads(dumps_document(loaded))
+    assert raw_saved["format"] == FORMAT_NAME
+
+    ohmbench_v1_payload = dict(legacy_v1_payload, format="ohmbench")
+    doc_ohm = loads_document(json.dumps(ohmbench_v1_payload))
+    assert doc_ohm.placed[0].component.name == "R1"
+
+    legacy_v2_payload = {
+        "format": "circuitsim",
+        "schema_version": 2,
+        "view": {"theme": "dark", "zoom": 1.0, "pan": [0.0, 0.0], "simulation_speed": "1x"},
+        "components": legacy_v1_payload["components"],
+        "junctions": [],
+        "wires": [],
+    }
+    assert loads_document_v2(json.dumps(legacy_v2_payload)).placed[0].component.name == "R1"
+    assert loads_document_v2(json.dumps(dict(legacy_v2_payload, format="ohmbench"))).placed[0].component.name == "R1"

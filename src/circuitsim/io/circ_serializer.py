@@ -45,6 +45,7 @@ from circuitsim.components.factory import (
 )
 
 FORMAT_NAME: str = "circuitsim"
+ACCEPTED_FORMAT_NAMES: tuple[str, ...] = ("circuitsim", "ohmbench")
 SCHEMA_VERSION: int = 1
 VALID_ROTATIONS: tuple[int, ...] = (0, 90, 180, 270)
 VALID_THEMES: tuple[str, ...] = ("dark", "light")
@@ -208,7 +209,7 @@ def dumps_document(doc: CircuitDocument) -> str:
 
 
 def _check_header(data: object) -> dict[str, Any]:
-    if not isinstance(data, dict) or data.get("format") != FORMAT_NAME:
+    if not isinstance(data, dict) or data.get("format") not in ACCEPTED_FORMAT_NAMES:
         raise CircuitFileError(
             f"This is not an {APP_NAME} file (the 'format' marker is missing)."
         )

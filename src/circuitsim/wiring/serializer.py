@@ -37,6 +37,7 @@ from circuitsim.canvas.symbol_geometry import (
     load_all_iec_metadata,
 )
 from circuitsim.io.circ_serializer import (
+    ACCEPTED_FORMAT_NAMES,
     CircuitDocument,
     CircuitFileError,
     PlacedComponentSpec,
@@ -175,7 +176,7 @@ def dumps_document_v2(doc: CircuitDocumentV2) -> str:
 
 def dict_to_document_v2(data: object) -> CircuitDocumentV2:
     """Parse a v2 document dictionary into CircuitDocumentV2."""
-    if not isinstance(data, dict) or data.get("format") != FORMAT_NAME:
+    if not isinstance(data, dict) or data.get("format") not in ACCEPTED_FORMAT_NAMES:
         raise CircuitFileError(f"This is not an {APP_NAME} file (the 'format' marker is missing).")
     version = data.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):

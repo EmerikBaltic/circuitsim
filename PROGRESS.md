@@ -14,7 +14,7 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## HYDROGEN QUEUE (Last Commit: phase-2.3)
+## HYDROGEN QUEUE (Last Commit: phase-2.4)
 ### Phase 0: Verify
 - [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
 
@@ -26,7 +26,7 @@
 - [x] 2.1 Rename Inventory in `PROGRESS.md` - *done*
 - [x] 2.2 Single source of truth `src/circuitsim/app_info.py` (no Qt) and user-visible strings - *done*
 - [x] 2.3 App Identity (`QCoreApplication` org/app = Ohmbench, one-time migration from `python`, Windows `AppUserModelID`) - *done*
-- [ ] 2.4 Stored Data (`.circ` backward compatibility and format identifier choice) - *todo*
+- [x] 2.4 Stored Data (`.circ` backward compatibility and format identifier choice) - *done*
 - [ ] 2.5 Tests (verify user-visible strings use `APP_NAME`, list legitimate old-name strings) - *todo*
 - [ ] 2.6 Docs (`README.md`, docs, `"Formerly CircuitSim"`, Stage 2 plan in `PROGRESS.md`) - *todo*
 
@@ -369,3 +369,7 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
 
 6. **URLs (`EmerikBaltic/circuitsim` -> `EmerikBaltic/ohmbench`)**:
    - `REPO_URL` and `ISSUES_URL` in `src/circuitsim/app/crash_handler.py` (centralized into `src/circuitsim/app_info.py`), Help > Report issue action, About dialog links, and `README.md` CI badge URL (and clone note).
+
+### `.circ` Format Identifier Decision (Phase 2.4)
+- **Decision**: Keep writing `FORMAT_NAME = "circuitsim"` on save in both `io/circ_serializer.py` and `wiring/serializer.py`, while accepting `ACCEPTED_FORMAT_NAMES = ("circuitsim", "ohmbench")` on load.
+- **Why**: Preserves full forward and backward compatibility with existing `.circ` project files, the 7 bundled example files (`resources/examples/*.circ`), earlier CircuitSim builds, and existing serializer contract tests (`test_file_declares_format_and_version`, `test_v2_save_and_load_round_trip`), while also accepting `"ohmbench"` cleanly if written in future builds.
