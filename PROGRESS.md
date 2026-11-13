@@ -14,7 +14,7 @@
 - Phase 2: Step 3C Full Properties Dialog (Identity, parameters, live readout, inductor helpers) - [todo]
 - Phase 3: Oscilloscope Plan (measure solver step rate, plan max 50 lines, wait for approval) - [todo]
 
-## HYDROGEN QUEUE (Last Commit: phase-1.2)
+## HYDROGEN QUEUE (Last Commit: phase-2.1)
 ### Phase 0: Verify
 - [x] Verify branch `main`, clean status, full suite baseline (`290 passed in 28.08s`), check prior work - *done*
 
@@ -23,7 +23,7 @@
 - [x] 1.2 Add `filterwarnings = ["error::DeprecationWarning:circuitsim.*"]` to `pyproject.toml`, list third-party warnings, add filter test - *done (0 third-party warnings remain; 291 passed in 26.32s)*
 
 ### Phase 2: Rename to Ohmbench, Stage 1 (on `main`)
-- [ ] 2.1 Rename Inventory in `PROGRESS.md` - *todo*
+- [x] 2.1 Rename Inventory in `PROGRESS.md` - *done*
 - [ ] 2.2 Single source of truth `src/circuitsim/app_info.py` (no Qt) and user-visible strings - *todo*
 - [ ] 2.3 App Identity (`QCoreApplication` org/app = Ohmbench, one-time migration from `python`, Windows `AppUserModelID`) - *todo*
 - [ ] 2.4 Stored Data (`.circ` backward compatibility and format identifier choice) - *todo*
@@ -340,3 +340,32 @@ Everything Step 4 needs to do to integrate the wire redesign with the schematic 
   - Qt-free module import checks (`circuitsim.engine`, `circuitsim.components`, `circuitsim.canvas.connectivity`, `circuitsim.wiring`, `circuitsim.io.circ_serializer`, `circuitsim.engine.simulation_session`) run in clean subprocesses via `assert_module_has_no_qt_imports` so `PySide6` is guaranteed absent from `sys.modules`.
   - The `1024x768` toolbar `speed_combo` visibility check in `test_qt_step2c_ui_responsiveness_upright_labels_speed_dropdown_and_quick_edit` runs in a clean native-QPA subprocess because Qt's `offscreen` fallback font inflates the toolbar `sizeHint` width (~1748 px vs ~1042 px on Windows).
 - **Runtime**: Full suite reduced from **150.86s** to **35.01s** (`290 passed`); fast subset `pytest -m "not slow"` runs in **23.22s** (`289 passed, 1 deselected`).
+
+## RENAME INVENTORY (CircuitSim -> Ohmbench, Stage 1)
+
+1. **User-visible text (Stage 1 -> `APP_NAME` = `"Ohmbench"`)**:
+   - Window title (`src/circuitsim/app/main_window.py`): `"CircuitSim — Electrical Circuit Simulator"` and `f"{name}{star} — CircuitSim"`.
+   - File dialogs (`src/circuitsim/app/main_window.py`): `"CircuitSim circuits (*.circ);;All files (*)"` / `"CircuitSim circuits (*.circ)"`.
+   - About dialog & Help menu (`src/circuitsim/app/main_window.py`): `"&About CircuitSim"`, tooltip `"About CircuitSim"`, dialog body `f"<h3>CircuitSim v{version}</h3>"`, title `"About CircuitSim"`.
+   - Crash handler & crash log (`src/circuitsim/app/crash_handler.py`): header `f"CircuitSim Crash Report: {now}"`, dialog body `f"CircuitSim encountered an unexpected error:..."`, dialog title `"CircuitSim Error"`.
+   - Serializer user error messages (`src/circuitsim/io/circ_serializer.py`, `src/circuitsim/wiring/serializer.py`): `"This is not a CircuitSim file..."`, `"This file was made by a newer version of CircuitSim ... Please update CircuitSim to open it."`, `"...not a CircuitSim circuit."`.
+   - CLI banner & parser (`src/circuitsim/main.py`): `"=== CircuitSim Milestone 1 Engine Demo ==="`, `argparse.ArgumentParser(description="CircuitSim Desktop Application")`.
+   - Developer preview tool (`src/circuitsim/tools/symbol_preview.py`): argparse description and window title `"CircuitSim — IEC Symbol Preview (Dark & Light Themes)"`.
+   - Documentation & guides (`README.md`, `PROGRESS.md`, `src/circuitsim/resources/symbols/iec/README.md`).
+
+2. **App identity, OS storage & environment paths (Stage 1 updates + migration)**:
+   - Qt identity (`QCoreApplication.setOrganizationName` / `setApplicationName`): currently unset, causing `QStandardPaths.AppDataLocation` to fall back to `AppData\Roaming\python`. Stage 1 sets both to `"Ohmbench"` and configures Windows `AppUserModelID`.
+   - Data dir fallbacks (`src/circuitsim/app/settings.py`): `"CircuitSim"` / `.circuitsim` / `circuitsim` + one-time copy migration from legacy `AppData\Roaming\python` (`settings.json`, `crash.log`, recent-files data) into the new Ohmbench folder.
+   - Env override: `CIRCUITSIM_DATA_DIR` (keep supported / Stage 2), `CIRCUITSIM_MAX_UI_GAP_MS` (test threshold env var, keep in Stage 1).
+
+3. **File/folder names (Deferred to Stage 2 unless doc-only)**:
+   - `src/circuitsim/` package directory, `pyproject.toml` `[project].name = "circuitsim"`, console script `circuitsim = "circuitsim.main:run_demo"`, MIME type `"application/x-circuitsim-component-id"`, `.circ` extension, `circuit_simulator_specification.txt`, and `circuitsim` module docstrings/imports — keep intact in Stage 1.
+
+4. **Internal identifiers (Unchanged in Stage 1)**:
+   - `circuitsim.*` imports, `CircuitScene`, `CircuitView`, `CircuitDocument`, `CircuitFileError`, `CIRCUITSIM_MAX_UI_GAP_MS`, test names/markers.
+
+5. **Stored data (`.circ` format field & bundled examples)**:
+   - `FORMAT_NAME = "circuitsim"` in `src/circuitsim/io/circ_serializer.py`, `src/circuitsim/wiring/serializer.py`, and all 7 files in `src/circuitsim/resources/examples/*.circ`, plus `.circ` test fixtures in `tests/test_circ_io.py`, `tests/test_led_examples.py`, `tests/test_wiring_v2_migration.py`. Stage 1 handles `"format"` decision and preserves seamless loading of legacy `"format": "circuitsim"` files.
+
+6. **URLs (`EmerikBaltic/circuitsim` -> `EmerikBaltic/ohmbench`)**:
+   - `REPO_URL` and `ISSUES_URL` in `src/circuitsim/app/crash_handler.py` (centralized into `src/circuitsim/app_info.py`), Help > Report issue action, About dialog links, and `README.md` CI badge URL (and clone note).
